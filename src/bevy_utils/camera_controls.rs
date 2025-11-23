@@ -5,10 +5,10 @@
 /// input: A list of keyboard and mouse inputs
 /// time: An object containing time information.
 use bevy::{
-    input::mouse::{AccumulatedMouseScroll, MouseMotion, MouseScrollUnit, MouseWheel},
+    input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     math::ops::powf,
     prelude::*,
-    transform,
+    window::PrimaryWindow,
 };
 
 #[derive(Debug)]
@@ -16,8 +16,8 @@ struct CameraSettings {
     translation_cont_sensitivity: f32,
     zoom_const_sensitivity: f32,
     zoom_scroll_line_sensitivity: f32,
-    zoom_scroll_pixel_sensitivity:f32,
-    mouse_pan_sensitivity:f32,
+    zoom_scroll_pixel_sensitivity: f32,
+    mouse_pan_sensitivity: f32,
 }
 
 static CAMERA_SETTINGS: CameraSettings = CameraSettings {
@@ -25,7 +25,7 @@ static CAMERA_SETTINGS: CameraSettings = CameraSettings {
     zoom_const_sensitivity: 4.0,
     zoom_scroll_pixel_sensitivity: 1.0 + 1e-3,
     zoom_scroll_line_sensitivity: 1.0 + 1e-1,
-    mouse_pan_sensitivity: 1.0
+    mouse_pan_sensitivity: 1.0,
 };
 
 pub(crate) fn controls(
@@ -34,12 +34,18 @@ pub(crate) fn controls(
     time: Res<Time<Fixed>>,
     mut mouse_scroll: MessageReader<MouseWheel>,
     mut mouse_motion: MessageReader<MouseMotion>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    window: Single<&Window, With<PrimaryWindow>>,
 ) {
     // Get variables to adjust
+    let window_center = window.size() / 2.0;
     let (mut transform, mut projection) = camera_query.into_inner();
     let Projection::Orthographic(projection2d) = &mut *projection else {
         return;
+    };
+    let mouse_pos = match window.cursor_position() {
+        Some(x) => x,
+        None => return,
     };
 
     // --- CONTINUOUS CONTROLS ---
@@ -75,24 +81,33 @@ pub(crate) fn controls(
     // --- SINGLE EVENT CONTROLS ---
     // Mouse scrolling
     for ev in mouse_scroll.read() {
+        let zoom: f32;
         match ev.unit {
             MouseScrollUnit::Line => {
-                // println!("Scrolling by {}", ev.y);
-                projection2d.scale *= powf(CAMERA_SETTINGS.zoom_scroll_line_sensitivity, ev.y);
-                //TODO: Add slight translation based on mouse position
+                zoom = powf(CAMERA_SETTINGS.zoom_scroll_line_sensitivity, ev.y);
             }
             MouseScrollUnit::Pixel => {
-                // println!("Scrolling by {}", ev.y);
-                projection2d.scale *= powf(CAMERA_SETTINGS.zoom_scroll_pixel_sensitivity, -ev.y)
-                //TODO: Add slight translation based on mouse position
+                zoom = powf(CAMERA_SETTINGS.zoom_scroll_pixel_sensitivity, -ev.y);
             }
         }
+        let origin_transform = get_origin_shift(window_center, mouse_pos, zoom);
+        projection2d.scale *= zoom;
+        transform.translation.x += origin_transform.x * projection2d.scale;
+        transform.translation.y -= origin_transform.y * projection2d.scale;
     }
 
     if mouse_buttons.pressed(MouseButton::Right) {
         for ev in mouse_motion.read() {
-            transform.translation.x -= ev.delta.x * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
-            transform.translation.y += ev.delta.y * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
+            transform.translation.x -=
+                ev.delta.x * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
+            transform.translation.y +=
+                ev.delta.y * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
         }
     }
+}
+
+fn get_origin_shift(origin_2d: Vec2, mouse_loc: Vec2, zoom: f32) -> Vec2 {
+    // Get mouse position from the center
+    let mouse_pos_from_cent = mouse_loc - origin_2d;
+    mouse_pos_from_cent - mouse_pos_from_cent * zoom
 }
