@@ -5,6 +5,8 @@ use bevy::{
     transform,
 };
 use rand::Rng;
+use crate::bevy_utils::camera_controls;
+pub mod bevy_utils;
 
 fn main() {
     App::new()
@@ -17,13 +19,13 @@ fn main() {
             ..Default::default()
         }))
         .add_systems(Startup, setup)
-        .add_systems(Update, controls)
+        .add_systems(Update, camera_controls::controls)
         .run();
 }
 
 fn setup(mut commands: Commands) {
     // Camera
-    commands.spawn(Camera2d::default());
+    commands.spawn(Camera2d);
 
     // Node material
     let mut rng = rand::rng();
@@ -41,39 +43,5 @@ fn setup(mut commands: Commands) {
             },
             Transform::from_xyz(x, y, 0.0),
         ));
-    }
-}
-
-fn controls(
-    camera_query: Single<(&mut Transform, &mut Projection)>,
-    input: Res<ButtonInput<KeyCode>>,
-    time: Res<Time<Fixed>>,
-) {
-    let (mut transform, mut projection) = camera_query.into_inner();
-
-    let fspeed = 600.0 * time.delta_secs();
-    // Camera movement controls
-    if input.pressed(KeyCode::ArrowUp) {
-        transform.translation.y += fspeed;
-    }
-    if input.pressed(KeyCode::ArrowDown) {
-        transform.translation.y -= fspeed;
-    }
-    if input.pressed(KeyCode::ArrowLeft) {
-        transform.translation.x -= fspeed;
-    }
-    if input.pressed(KeyCode::ArrowRight) {
-        transform.translation.x += fspeed;
-    }
-
-    // Camera zoom controls
-    if let Projection::Orthographic(projection2d) = &mut *projection {
-        if input.pressed(KeyCode::Comma) {
-            projection2d.scale *= powf(4.0f32, time.delta_secs());
-        }
-
-        if input.pressed(KeyCode::Period) {
-            projection2d.scale *= powf(0.25f32, time.delta_secs());
-        }
     }
 }
