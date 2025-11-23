@@ -1,0 +1,9 @@
+[package]
+name = "wg-graph"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.17", features = ["dynamic_linking"] }
+rand = "0.9"
+winit = "0.30"
