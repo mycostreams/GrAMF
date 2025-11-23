@@ -16,7 +16,8 @@ struct CameraSettings {
     translation_cont_sensitivity: f32,
     zoom_const_sensitivity: f32,
     zoom_scroll_line_sensitivity: f32,
-    zoom_scroll_pixel_sensitivity:f32
+    zoom_scroll_pixel_sensitivity:f32,
+    mouse_pan_sensitivity:f32,
 }
 
 static CAMERA_SETTINGS: CameraSettings = CameraSettings {
@@ -24,13 +25,16 @@ static CAMERA_SETTINGS: CameraSettings = CameraSettings {
     zoom_const_sensitivity: 4.0,
     zoom_scroll_pixel_sensitivity: 1.0 + 1e-3,
     zoom_scroll_line_sensitivity: 1.0 + 1e-1,
+    mouse_pan_sensitivity: 1.0
 };
 
 pub(crate) fn controls(
     camera_query: Single<(&mut Transform, &mut Projection)>,
     input: Res<ButtonInput<KeyCode>>,
     time: Res<Time<Fixed>>,
-    mut mouse: MessageReader<MouseWheel>,
+    mut mouse_scroll: MessageReader<MouseWheel>,
+    mut mouse_motion: MessageReader<MouseMotion>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>
 ) {
     // Get variables to adjust
     let (mut transform, mut projection) = camera_query.into_inner();
@@ -70,16 +74,25 @@ pub(crate) fn controls(
 
     // --- SINGLE EVENT CONTROLS ---
     // Mouse scrolling
-    for ev in mouse.read() {
+    for ev in mouse_scroll.read() {
         match ev.unit {
             MouseScrollUnit::Line => {
-                println!("Scrolling by {}", ev.y);
+                // println!("Scrolling by {}", ev.y);
                 projection2d.scale *= powf(CAMERA_SETTINGS.zoom_scroll_line_sensitivity, ev.y);
+                //TODO: Add slight translation based on mouse position
             }
             MouseScrollUnit::Pixel => {
-                println!("Scrolling by {}", ev.y);
-                projection2d.scale *= powf(CAMERA_SETTINGS.zoom_scroll_pixel_sensitivity, ev.y)
+                // println!("Scrolling by {}", ev.y);
+                projection2d.scale *= powf(CAMERA_SETTINGS.zoom_scroll_pixel_sensitivity, -ev.y)
+                //TODO: Add slight translation based on mouse position
             }
+        }
+    }
+
+    if mouse_buttons.pressed(MouseButton::Right) {
+        for ev in mouse_motion.read() {
+            transform.translation.x -= ev.delta.x * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
+            transform.translation.y += ev.delta.y * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
         }
     }
 }
