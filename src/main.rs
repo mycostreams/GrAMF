@@ -1,11 +1,6 @@
-use bevy::{
-    input::mouse::{AccumulatedMouseScroll, MouseMotion, MouseWheel},
-    math::ops::powf,
-    prelude::*,
-    transform,
-};
-use rand::Rng;
 use crate::bevy_utils::camera_controls;
+use bevy::prelude::*;
+use rand::Rng;
 pub mod bevy_utils;
 
 fn main() {
