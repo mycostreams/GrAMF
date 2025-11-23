@@ -17,7 +17,6 @@ struct CameraSettings {
     zoom_const_sensitivity: f32,
     zoom_scroll_line_sensitivity: f32,
     zoom_scroll_pixel_sensitivity: f32,
-    mouse_pan_sensitivity: f32,
 }
 
 static CAMERA_SETTINGS: CameraSettings = CameraSettings {
@@ -25,9 +24,9 @@ static CAMERA_SETTINGS: CameraSettings = CameraSettings {
     zoom_const_sensitivity: 4.0,
     zoom_scroll_pixel_sensitivity: 1.0 + 1e-3,
     zoom_scroll_line_sensitivity: 1.0 + 1e-1,
-    mouse_pan_sensitivity: 1.0,
 };
 
+/// Update function that handles all controls in the graph viewport
 pub(crate) fn controls(
     camera_query: Single<(&mut Transform, &mut Projection)>,
     input: Res<ButtonInput<KeyCode>>,
@@ -99,9 +98,9 @@ pub(crate) fn controls(
     if mouse_buttons.pressed(MouseButton::Right) {
         for ev in mouse_motion.read() {
             transform.translation.x -=
-                ev.delta.x * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
+                ev.delta.x  * projection2d.scale;
             transform.translation.y +=
-                ev.delta.y * CAMERA_SETTINGS.mouse_pan_sensitivity * projection2d.scale;
+                ev.delta.y  * projection2d.scale;
         }
     }
 }
