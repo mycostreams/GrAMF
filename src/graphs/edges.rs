@@ -2,8 +2,8 @@ use bevy::math::Vec3;
 
 #[derive(Debug, Clone)]
 pub(crate) struct EdgeData {
-    width: f32,
-    node_poss: (Vec3, Vec3)
+    pub(crate) width: f32,
+    pub(crate) node_poss: (Vec3, Vec3),
 }
 
 impl EdgeData {

@@ -1,5 +1,8 @@
-use crate::{bevy_utils::camera_controls, graphs::STG_graph::SpatioTemporalGraph};
-use bevy::prelude::*;
+use crate::{
+    bevy_utils::{camera_controls, graph_entities::EntityNode},
+    graphs::{edges::EdgeData, nodes::NodeData, STG_graph::SpatioTemporalGraph},
+};
+use bevy::{ecs::bundle::Bundles, mesh, prelude::*};
 use rand::Rng;
 pub mod bevy_utils;
 pub mod graphs;
@@ -24,22 +27,65 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    stg_graph: Res<SpatioTemporalGraph>,
+    mut stg_graph: ResMut<SpatioTemporalGraph>,
 ) {
     // Camera
     commands.spawn(Camera2d);
 
+    let nodes = [
+        NodeData {
+            pos: (10.0, 0.0, 0.0).into(),
+            id: 0,
+        },
+        NodeData {
+            pos: (0.0, 10.0, 0.0).into(),
+            id: 1,
+        },
+        NodeData {
+            pos: (10.0, 10.0, 0.0).into(),
+            id: 2,
+        },
+    ];
+
+    for node in nodes {
+        stg_graph.graph.add_node(node);
+    }
+
+    stg_graph.graph.add_edge(
+        nodes[0].into(),
+        nodes[1].into(),
+        EdgeData {
+            width: 0.5,
+            node_poss: (nodes[0].pos, nodes[1].pos),
+        },
+    );
+
     for node in stg_graph.graph.raw_nodes() {
+        commands
+            .spawn((EntityNode::new(node.weight.pos), Pickable::default()))
+            .observe(recolor_on::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
+            .observe(recolor_on::<Pointer<Out>>(Color::BLACK))
+            .observe(recolor_on::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
+            .observe(recolor_on::<Pointer<Release>>(Color::srgb(0.0, 1.0, 1.0)));
         commands.spawn((
-            Sprite {
-                color: Color::WHITE,
-                custom_size: Some(Vec2::splat(2.0)),
-                ..Default::default()
-            },
-            Transform::from_translation(node.weight.pos),
+            Mesh2d(meshes.add(Segment2d::new(
+                [nodes[0].pos.x, nodes[0].pos.y].into(),
+                [nodes[1].pos.x, nodes[1].pos.y].into(),
+            ))),
+            MeshMaterial2d(materials.add(Color::WHITE)),
         ));
     }
 
+    fn recolor_on<E: EntityEvent + Clone + Reflect>(
+        color: Color,
+    ) -> impl Fn(On<E>, Query<&mut Sprite>) {
+        move |ev, mut sprites| {
+            let Ok(mut sprite) = sprites.get_mut(ev.event_target()) else {
+                return;
+            };
+            sprite.color = color;
+        }
+    }
     // // Node material
     // let mut rng = rand::rng();
 
