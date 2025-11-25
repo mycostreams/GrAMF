@@ -1,4 +1,4 @@
-use crate::{bevy_utils::camera_controls, graphs::SpatioTemporalGraph};
+use crate::{bevy_utils::camera_controls, graphs::STG_graph::SpatioTemporalGraph};
 use bevy::prelude::*;
 use rand::Rng;
 pub mod bevy_utils;
@@ -24,7 +24,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    stg_graph: Res<SpatioTemporalGraph>
+    stg_graph: Res<SpatioTemporalGraph>,
 ) {
     // Camera
     commands.spawn(Camera2d);
