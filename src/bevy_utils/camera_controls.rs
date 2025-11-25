@@ -97,10 +97,8 @@ pub(crate) fn controls(
 
     if mouse_buttons.pressed(MouseButton::Right) {
         for ev in mouse_motion.read() {
-            transform.translation.x -=
-                ev.delta.x  * projection2d.scale;
-            transform.translation.y +=
-                ev.delta.y  * projection2d.scale;
+            transform.translation.x -= ev.delta.x * projection2d.scale;
+            transform.translation.y += ev.delta.y * projection2d.scale;
         }
     }
 }

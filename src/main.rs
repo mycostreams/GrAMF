@@ -1,4 +1,4 @@
-use crate::bevy_utils::camera_controls;
+use crate::{bevy_utils::camera_controls, graphs::SpatioTemporalGraph};
 use bevy::prelude::*;
 use rand::Rng;
 pub mod bevy_utils;
@@ -16,28 +16,27 @@ fn main() {
         }))
         .add_systems(Startup, setup)
         .add_systems(Update, camera_controls::controls)
+        .init_resource::<SpatioTemporalGraph>()
         .run();
 }
 
-fn setup(mut commands: Commands, 
+fn setup(
+    mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-
+    stg_graph: Res<SpatioTemporalGraph>
 ) {
     // Camera
     commands.spawn(Camera2d);
 
-    let spatiograph = graphs::return_simple_graph();
-    println!("{:?}", spatiograph);
-
-    for node in spatiograph.graph.raw_nodes() {
+    for node in stg_graph.graph.raw_nodes() {
         commands.spawn((
-            Sprite{
+            Sprite {
                 color: Color::WHITE,
                 custom_size: Some(Vec2::splat(2.0)),
                 ..Default::default()
             },
-            Transform::from_translation(node.weight.pos)
+            Transform::from_translation(node.weight.pos),
         ));
     }
 
