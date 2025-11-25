@@ -80,15 +80,14 @@ pub(crate) fn controls(
     // --- SINGLE EVENT CONTROLS ---
     // Mouse scrolling
     for ev in mouse_scroll.read() {
-        let zoom: f32;
-        match ev.unit {
+        let zoom: f32 = match ev.unit {
             MouseScrollUnit::Line => {
-                zoom = powf(CAMERA_SETTINGS.zoom_scroll_line_sensitivity, ev.y);
+                powf(CAMERA_SETTINGS.zoom_scroll_line_sensitivity, ev.y)
             }
             MouseScrollUnit::Pixel => {
-                zoom = powf(CAMERA_SETTINGS.zoom_scroll_pixel_sensitivity, -ev.y);
+                powf(CAMERA_SETTINGS.zoom_scroll_pixel_sensitivity, -ev.y)
             }
-        }
+        };
         let origin_transform = get_origin_shift(window_center, mouse_pos, zoom);
         projection2d.scale *= zoom;
         transform.translation.x += origin_transform.x * projection2d.scale;
