@@ -2,8 +2,7 @@ use crate::{
     bevy_utils::{camera_controls, graph_entities::EntityNode},
     graphs::{edges::EdgeData, nodes::NodeData, STG_graph::SpatioTemporalGraph},
 };
-use bevy::{ecs::bundle::Bundles, mesh, prelude::*};
-use rand::Rng;
+use bevy::prelude::*;
 pub mod bevy_utils;
 pub mod graphs;
 
@@ -61,12 +60,7 @@ fn setup(
     );
 
     for node in stg_graph.graph.raw_nodes() {
-        commands
-            .spawn((EntityNode::new(node.weight.pos), Pickable::default()))
-            .observe(recolor_on::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
-            .observe(recolor_on::<Pointer<Out>>(Color::BLACK))
-            .observe(recolor_on::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
-            .observe(recolor_on::<Pointer<Release>>(Color::srgb(0.0, 1.0, 1.0)));
+        _spawn_node(node.weight, &mut commands);
         commands.spawn((
             Mesh2d(meshes.add(Segment2d::new(
                 [nodes[0].pos.x, nodes[0].pos.y].into(),
@@ -74,17 +68,6 @@ fn setup(
             ))),
             MeshMaterial2d(materials.add(Color::WHITE)),
         ));
-    }
-
-    fn recolor_on<E: EntityEvent + Clone + Reflect>(
-        color: Color,
-    ) -> impl Fn(On<E>, Query<&mut Sprite>) {
-        move |ev, mut sprites| {
-            let Ok(mut sprite) = sprites.get_mut(ev.event_target()) else {
-                return;
-            };
-            sprite.color = color;
-        }
     }
     // // Node material
     // let mut rng = rand::rng();
@@ -103,4 +86,29 @@ fn setup(
     //         Transform::from_xyz(x, y, 0.0),
     //     ));
     // }
+}
+
+fn _spawn_node(
+    node: NodeData,
+    commands: &mut Commands,
+    // meshes: ResMut<Assets<Mesh>>,
+    // materials: ResMut<Assets<ColorMaterial>>,
+) {
+    commands
+        .spawn((EntityNode::new(node.pos), Pickable::default()))
+        .observe(recolor_on::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
+        .observe(recolor_on::<Pointer<Out>>(Color::BLACK))
+        .observe(recolor_on::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
+        .observe(recolor_on::<Pointer<Release>>(Color::srgb(0.0, 1.0, 1.0)));
+}
+
+fn recolor_on<E: EntityEvent + Clone + Reflect>(
+    color: Color,
+) -> impl Fn(On<E>, Query<&mut Sprite>) {
+    move |ev, mut sprites| {
+        let Ok(mut sprite) = sprites.get_mut(ev.event_target()) else {
+            return;
+        };
+        sprite.color = color;
+    }
 }
