@@ -3,6 +3,7 @@ use crate::{
     graphs::{edges::EdgeData, nodes::NodeData, STG_graph::SpatioTemporalGraph},
 };
 use bevy::prelude::*;
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui};
 pub mod bevy_utils;
 pub mod graphs;
 
@@ -16,8 +17,10 @@ fn main() {
             }),
             ..Default::default()
         }))
+        .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, camera_controls::controls)
+        .add_systems(EguiPrimaryContextPass, (ui_system))
         .init_resource::<SpatioTemporalGraph>()
         .run();
 }
@@ -61,31 +64,26 @@ fn setup(
 
     for node in stg_graph.graph.raw_nodes() {
         _spawn_node(node.weight, &mut commands);
+    }
+    for edge in stg_graph.graph.raw_edges() {
         commands.spawn((
-            Mesh2d(meshes.add(Segment2d::new(
-                [nodes[0].pos.x, nodes[0].pos.y].into(),
-                [nodes[1].pos.x, nodes[1].pos.y].into(),
-            ))),
+            Mesh2d(
+                meshes.add(Segment2d::new(
+                    [
+                        stg_graph.graph[edge.source()].pos.x,
+                        stg_graph.graph[edge.source()].pos.y,
+                    ]
+                    .into(),
+                    [
+                        stg_graph.graph[edge.target()].pos.x,
+                        stg_graph.graph[edge.target()].pos.y,
+                    ]
+                    .into(),
+                )),
+            ),
             MeshMaterial2d(materials.add(Color::WHITE)),
         ));
     }
-    // // Node material
-    // let mut rng = rand::rng();
-
-    // // Spawn 10k nodes (Bevy will batch these into instanced draw calls)
-    // for _ in 0..10_000 {
-    //     let x = rng.random_range(-500.0..500.0);
-    //     let y = rng.random_range(-500.0..500.0);
-
-    //     commands.spawn((
-    //         Sprite {
-    //             color: Color::WHITE,
-    //             custom_size: Some(Vec2::splat(2.0)),
-    //             ..Default::default()
-    //         },
-    //         Transform::from_xyz(x, y, 0.0),
-    //     ));
-    // }
 }
 
 fn _spawn_node(
@@ -97,7 +95,7 @@ fn _spawn_node(
     commands
         .spawn((EntityNode::new(node.pos), Pickable::default()))
         .observe(recolor_on::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
-        .observe(recolor_on::<Pointer<Out>>(Color::BLACK))
+        .observe(recolor_on::<Pointer<Out>>(Color::WHITE))
         .observe(recolor_on::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
         .observe(recolor_on::<Pointer<Release>>(Color::srgb(0.0, 1.0, 1.0)));
 }
@@ -111,4 +109,20 @@ fn recolor_on<E: EntityEvent + Clone + Reflect>(
         };
         sprite.color = color;
     }
+}
+
+fn ui_system(mut contexts: EguiContexts) -> Result {
+    let ctx = contexts.ctx_mut()?;
+
+    egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+        // The top panel is often a good place for a menu bar:
+        egui::MenuBar::new().ui(ui, |ui| {
+            egui::containers::menu::MenuButton::new("File").ui(ui, |ui| {
+                if ui.button("Quit").clicked() {
+                    std::process::exit(0);
+                }
+            });
+        });
+    });
+    Ok(())
 }
