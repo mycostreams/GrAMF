@@ -1,9 +1,9 @@
 use crate::{
     bevy_utils::{camera_controls, graph_entities::EntityNode},
-    graphs::{edges::EdgeData, nodes::NodeData, STG_graph::SpatioTemporalGraph},
+    graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 pub mod bevy_utils;
 pub mod graphs;
 
@@ -20,7 +20,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, camera_controls::controls)
-        .add_systems(EguiPrimaryContextPass, (ui_system))
+        .add_systems(EguiPrimaryContextPass, ui_system)
         .init_resource::<SpatioTemporalGraph>()
         .run();
 }
