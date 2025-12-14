@@ -14,11 +14,10 @@ use bevy::{
 };
 
 use crate::{
-    bevy_utils::graph_entities::{EntityNode, UiEdge},
-    graphs::{nodes::NodeData, stg_graph::SpatioTemporalGraph},
+    bevy_utils::graph_entities::{EntityNode, UiEdge}, gramf_ui::ui_layout::recolor_on, graphs::{nodes::NodeData, stg_graph::SpatioTemporalGraph}
 };
 
-pub fn spawn_graph(
+pub(crate) fn spawn_graph(
     stg_graph: &SpatioTemporalGraph,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -53,7 +52,7 @@ fn spawn_node(
 }
 
 // Add this new system function:
-pub fn update_edge_scale(
+pub(crate) fn update_edge_scale(
     camera_query: Single<&Projection>,
     mut edge_query: Query<(&mut Transform, &UiEdge)>,
 ) {

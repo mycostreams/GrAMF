@@ -22,7 +22,8 @@ pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
     Ok(())
 }
 
-fn recolor_on<E: EntityEvent + Clone + Reflect>(
+/// Recolor the sprite of an entity when an event of type E occurs on it.
+pub fn recolor_on<E: EntityEvent + Clone + Reflect>(
     color: Color,
 ) -> impl Fn(On<E>, Query<&mut Sprite>) {
     move |ev, mut sprites| {
