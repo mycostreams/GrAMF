@@ -8,7 +8,12 @@ use bevy::{
     remote::{http::RemoteHttpPlugin, RemotePlugin},
 };
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+
+/// Bevy utilities module containing various helper functions and structures to
+/// integrate crate structures with Bevy's ECS system.
 pub mod bevy_utils;
+
+/// grAMF UI module containing widgets and UI layout definitions.
 pub mod gramf_ui;
 
 /// Graphs module containing various graph implementations and related structures.
