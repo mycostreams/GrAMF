@@ -19,7 +19,6 @@ use crate::{
     graphs::{nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
 
-
 /// Spawn the entire graph: nodes and edges.
 pub(crate) fn spawn_graph(
     stg_graph: &SpatioTemporalGraph,

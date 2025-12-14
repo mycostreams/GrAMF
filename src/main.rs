@@ -1,6 +1,9 @@
 use crate::{
     bevy_utils::camera_controls,
-    gramf_ui::{ui_graph::{spawn_graph, update_edge_scale}, ui_layout::ui_system},
+    gramf_ui::{
+        ui_graph::{spawn_graph, update_edge_scale},
+        ui_layout::ui_system,
+    },
     graphs::stg_graph::SpatioTemporalGraph,
 };
 use bevy::prelude::*;
