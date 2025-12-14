@@ -1,6 +1,6 @@
 use bevy::math::Vec3;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct EdgeData {
     pub(crate) node_poss: (Vec3, Vec3),
 }

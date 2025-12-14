@@ -2,8 +2,11 @@ use bevy::{
     asset::Assets,
     camera::Projection,
     color::Color,
-    ecs::system::{Commands, Query, ResMut, Single},
-    math::{primitives::Rectangle, Quat, Vec3},
+    ecs::{
+        component::Component,
+        system::{Commands, Query, ResMut, Single},
+    },
+    math::{primitives::Rectangle, Quat},
     mesh::{Mesh, Mesh2d},
     picking::{
         events::{Out, Over, Pointer, Press, Release},
@@ -14,9 +17,9 @@ use bevy::{
 };
 
 use crate::{
-    bevy_utils::graph_entities::{EntityNode, UiEdge},
+    bevy_utils::graph_entities::EntityNode,
     gramf_ui::ui_layout::recolor_on,
-    graphs::{nodes::NodeData, stg_graph::SpatioTemporalGraph},
+    graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
 
 /// Spawn the entire graph: nodes and edges.
@@ -30,13 +33,7 @@ pub(crate) fn spawn_graph(
         spawn_node(node.weight, commands);
     }
     for edge in stg_graph.graph.raw_edges() {
-        spawn_edge(
-            stg_graph.graph[edge.source()].pos,
-            stg_graph.graph[edge.target()].pos,
-            commands,
-            meshes,
-            materials,
-        );
+        spawn_edge(edge.weight, commands, meshes, materials);
     }
 }
 
@@ -57,16 +54,15 @@ fn spawn_node(
 
 /// Spawn an edge between two positions as a rectangle mesh.
 fn spawn_edge(
-    start_pos: Vec3,
-    end_pos: Vec3,
+    edge_data: EdgeData,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
 ) {
     let edge_width = 2.0;
-    let midpoint = (start_pos + end_pos) / 2.0;
-    let direction = (end_pos - start_pos).normalize();
-    let distance = start_pos.distance(end_pos);
+    let midpoint = (edge_data.node_poss.0 + edge_data.node_poss.1) / 2.0;
+    let direction = (edge_data.node_poss.1 - edge_data.node_poss.0).normalize();
+    let distance = edge_data.node_poss.0.distance(edge_data.node_poss.1);
     let angle = direction.y.atan2(direction.x);
 
     commands.spawn((
@@ -88,5 +84,16 @@ pub(crate) fn update_edge_scale(
 
     for (mut transform, edge) in &mut edge_query {
         transform.scale.y = edge.base_width * proj.scale;
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct UiEdge {
+    pub(crate) base_width: f32,
+}
+
+impl UiEdge {
+    pub fn new(base_width: f32) -> Self {
+        UiEdge { base_width }
     }
 }

@@ -2,7 +2,6 @@ use bevy::math::Vec3;
 use petgraph::graph::NodeIndex;
 
 #[derive(Debug, Clone, Default, Copy)]
-
 pub(crate) struct NodeData {
     pub(crate) pos: Vec3,
     pub(crate) id: usize,
