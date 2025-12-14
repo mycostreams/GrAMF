@@ -1,6 +1,10 @@
-use bevy::prelude::Result;
-use bevy_egui::egui;
-use bevy_egui::EguiContexts;
+use bevy::color::Color;
+use bevy::{
+    ecs::{event::EntityEvent, observer::On, system::Query},
+    prelude::Result,
+};
+use bevy::{reflect::Reflect, sprite::Sprite};
+use bevy_egui::{egui, EguiContexts};
 
 pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -16,4 +20,15 @@ pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
         });
     });
     Ok(())
+}
+
+fn recolor_on<E: EntityEvent + Clone + Reflect>(
+    color: Color,
+) -> impl Fn(On<E>, Query<&mut Sprite>) {
+    move |ev, mut sprites| {
+        let Ok(mut sprite) = sprites.get_mut(ev.event_target()) else {
+            return;
+        };
+        sprite.color = color;
+    }
 }
