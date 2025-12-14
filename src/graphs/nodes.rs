@@ -13,3 +13,11 @@ impl From<NodeData> for NodeIndex {
         NodeIndex::new(value.id)
     }
 }
+
+
+#[test]
+fn test_node_data_conversion() {
+    let node = NodeData { pos: Vec3::ZERO, id: 5 };
+    let index: NodeIndex = node.into();
+    assert_eq!(index.index(), 5);
+}

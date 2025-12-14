@@ -6,6 +6,7 @@ use bevy::{
 use bevy::{reflect::Reflect, sprite::Sprite};
 use bevy_egui::{egui, EguiContexts};
 
+/// UI layout system that defines the structure and behavior of the UI components.
 pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
     let ctx = contexts.ctx_mut()?;
 

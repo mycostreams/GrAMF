@@ -36,7 +36,7 @@ impl SpatioTemporalGraph {
         stg.graph.add_edge(
             petgraph::graph::NodeIndex::new(0),
             petgraph::graph::NodeIndex::new(1),
-            EdgeData { width: 1.0, node_poss: (nodes[0].pos, nodes[1].pos) },
+            EdgeData { node_poss: (nodes[0].pos, nodes[1].pos) },
         );
 
         stg

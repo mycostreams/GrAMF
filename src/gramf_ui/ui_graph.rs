@@ -14,9 +14,13 @@ use bevy::{
 };
 
 use crate::{
-    bevy_utils::graph_entities::{EntityNode, UiEdge}, gramf_ui::ui_layout::recolor_on, graphs::{nodes::NodeData, stg_graph::SpatioTemporalGraph}
+    bevy_utils::graph_entities::{EntityNode, UiEdge},
+    gramf_ui::ui_layout::recolor_on,
+    graphs::{nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
 
+
+/// Spawn the entire graph: nodes and edges.
 pub(crate) fn spawn_graph(
     stg_graph: &SpatioTemporalGraph,
     commands: &mut Commands,
@@ -37,6 +41,7 @@ pub(crate) fn spawn_graph(
     }
 }
 
+/// Spawn a node at its position with pickable and recoloring behavior.
 fn spawn_node(
     node: NodeData,
     commands: &mut Commands,
@@ -51,20 +56,7 @@ fn spawn_node(
         .observe(recolor_on::<Pointer<Release>>(Color::srgb(0.0, 1.0, 1.0)));
 }
 
-// Add this new system function:
-pub(crate) fn update_edge_scale(
-    camera_query: Single<&Projection>,
-    mut edge_query: Query<(&mut Transform, &UiEdge)>,
-) {
-    let Projection::Orthographic(proj) = &*camera_query else {
-        return;
-    };
-
-    for (mut transform, edge) in &mut edge_query {
-        transform.scale.y = edge.base_width * proj.scale;
-    }
-}
-
+/// Spawn an edge between two positions as a rectangle mesh.
 fn spawn_edge(
     start_pos: Vec3,
     end_pos: Vec3,
@@ -84,4 +76,18 @@ fn spawn_edge(
         Transform::from_translation(midpoint).with_rotation(Quat::from_rotation_z(angle)),
         UiEdge::new(edge_width),
     ));
+}
+
+/// Update the scale of edges based on the camera's zoom level to maintain consistent visual thickness.
+pub(crate) fn update_edge_scale(
+    camera_query: Single<&Projection>,
+    mut edge_query: Query<(&mut Transform, &UiEdge)>,
+) {
+    let Projection::Orthographic(proj) = &*camera_query else {
+        return;
+    };
+
+    for (mut transform, edge) in &mut edge_query {
+        transform.scale.y = edge.base_width * proj.scale;
+    }
 }
