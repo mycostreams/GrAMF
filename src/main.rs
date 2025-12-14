@@ -3,10 +3,15 @@ use crate::{
     gramf_ui::ui_layout::ui_system,
     graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    remote::{http::RemoteHttpPlugin, RemotePlugin},
+};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 pub mod bevy_utils;
 pub mod gramf_ui;
+
+/// Graphs module containing various graph implementations and related structures.
 pub mod graphs;
 
 fn main() {
@@ -21,6 +26,8 @@ fn main() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup)
+        .add_plugins(RemotePlugin::default()) // Core remote protocol
+        .add_plugins(RemoteHttpPlugin::default()) // Enable HTTP transport
         .add_systems(Update, camera_controls::controls)
         .add_systems(EguiPrimaryContextPass, ui_system)
         .init_resource::<SpatioTemporalGraph>()
@@ -36,36 +43,18 @@ fn setup(
     // Camera
     commands.spawn(Camera2d);
 
-    let nodes = [
-        NodeData {
-            pos: (10.0, 0.0, 0.0).into(),
-            id: 0,
-        },
-        NodeData {
-            pos: (0.0, 10.0, 0.0).into(),
-            id: 1,
-        },
-        NodeData {
-            pos: (10.0, 10.0, 0.0).into(),
-            id: 2,
-        },
-    ];
+    *stg_graph = SpatioTemporalGraph::generate_simple();
+    spawn_graph(&stg_graph, &mut commands, &mut meshes, &mut materials);
+}
 
-    for node in nodes {
-        stg_graph.graph.add_node(node);
-    }
-
-    stg_graph.graph.add_edge(
-        nodes[0].into(),
-        nodes[1].into(),
-        EdgeData {
-            width: 0.5,
-            node_poss: (nodes[0].pos, nodes[1].pos),
-        },
-    );
-
+fn spawn_graph(
+    stg_graph: &SpatioTemporalGraph,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+) {
     for node in stg_graph.graph.raw_nodes() {
-        _spawn_node(node.weight, &mut commands);
+        spawn_node(node.weight, commands);
     }
     for edge in stg_graph.graph.raw_edges() {
         commands.spawn((
@@ -88,7 +77,7 @@ fn setup(
     }
 }
 
-fn _spawn_node(
+fn spawn_node(
     node: NodeData,
     commands: &mut Commands,
     // meshes: ResMut<Assets<Mesh>>,

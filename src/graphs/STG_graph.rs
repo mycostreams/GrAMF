@@ -10,6 +10,39 @@ pub(crate) struct SpatioTemporalGraph {
     timestamps: HashMap<i32, NaiveDateTime>,
 }
 
+impl SpatioTemporalGraph {
+    pub fn generate_simple() -> Self {
+        let mut stg = SpatioTemporalGraph::default();
+
+        let nodes = [
+            NodeData {
+                pos: (10.0, 0.0, 0.0).into(),
+                id: 0,
+            },
+            NodeData {
+                pos: (0.0, 10.0, 0.0).into(),
+                id: 1,
+            },
+            NodeData {
+                pos: (10.0, 10.0, 0.0).into(),
+                id: 2,
+            },
+        ];
+
+        for node in nodes {
+            stg.graph.add_node(node);
+        }
+
+        stg.graph.add_edge(
+            petgraph::graph::NodeIndex::new(0),
+            petgraph::graph::NodeIndex::new(1),
+            EdgeData { width: 1.0, node_poss: (nodes[0].pos, nodes[1].pos) },
+        );
+
+        stg
+    }
+}
+
 #[test]
 fn test_default_graph() {
     let test_graph = SpatioTemporalGraph::default();
@@ -17,45 +50,9 @@ fn test_default_graph() {
     assert_eq!(test_graph.graph.node_count(), 0);
 }
 
-// pub(crate) fn return_simple_graph() -> SpatioTemporalGraph {
-//     let node1 = NodeData {
-//         pos: Vec3 {
-//             x: 0.0,
-//             y: 10.0,
-//             z: 0.0,
-//         },
-//         id: 0,
-//     };
-//     let node2 = NodeData {
-//         pos: Vec3::new(10.0, 0.0, 0.0),
-//         id: 1,
-//     };
-//     let node3: NodeData = NodeData {
-//         pos: Vec3 {
-//             x: 10.0,
-//             y: 10.0,
-//             z: 0.0,
-//         },
-//         id: 2,
-//     };
-
-//     let mut g = UnGraph::<NodeData, EdgeData>::new_undirected();
-//     for node in [node1, node2, node3] {
-//         g.add_node(node);
-//     }
-//     for edge in [(0, 1), (1, 2), (2, 0)] {
-//         g.add_edge(edge.0.into(), edge.1.into(), EdgeData { width: 5.0 });
-//     }
-//     let mut timestamps = HashMap::<i32, NaiveDateTime>::new();
-//     let time1 = NaiveDate::from_ymd_opt(2016, 7, 8)
-//         .unwrap()
-//         .and_hms_opt(9, 10, 11)
-//         .unwrap();
-
-//     timestamps.insert(0, time1);
-
-//     return SpatioTemporalGraph {
-//         graph: g,
-//         timestamps: timestamps,
-//     };
-// }
+#[test]
+fn test_generate_simple() {
+    let test_graph = SpatioTemporalGraph::generate_simple();
+    assert_eq!(test_graph.graph.node_count(), 3);
+    assert_eq!(test_graph.graph.edge_count(), 1);
+}
