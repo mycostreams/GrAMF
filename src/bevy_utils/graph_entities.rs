@@ -1,5 +1,6 @@
 use bevy::{
     color::Color,
+    ecs::component::Component,
     math::{Vec2, Vec3},
     prelude::Bundle,
     sprite::Sprite,
@@ -22,5 +23,16 @@ impl EntityNode {
             },
             transform: Transform::from_translation(pos),
         }
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct UiEdge {
+    pub(crate) base_width: f32,
+}
+
+impl UiEdge {
+    pub fn new(base_width: f32) -> Self {
+        UiEdge { base_width }
     }
 }
