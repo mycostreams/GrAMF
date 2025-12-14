@@ -17,8 +17,8 @@ use bevy::{
 };
 
 use crate::{
-    bevy_utils::graph_entities::EntityNode,
-    gramf_ui::ui_layout::recolor_on,
+    bevy_utils::{graph_entities::EntityNode, resource_config::EDGE_WIDTH_SCALE_VISIBLE},
+    gramf_ui::ui_layout::{recolor_mesh_material, recolor_sprite},
     graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
 
@@ -46,10 +46,12 @@ fn spawn_node(
 ) {
     commands
         .spawn((EntityNode::new(node.pos), Pickable::default()))
-        .observe(recolor_on::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
-        .observe(recolor_on::<Pointer<Out>>(Color::WHITE))
-        .observe(recolor_on::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
-        .observe(recolor_on::<Pointer<Release>>(Color::srgb(0.0, 1.0, 1.0)));
+        .observe(recolor_sprite::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
+        .observe(recolor_sprite::<Pointer<Out>>(Color::WHITE))
+        .observe(recolor_sprite::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
+        .observe(recolor_sprite::<Pointer<Release>>(Color::srgb(
+            0.0, 1.0, 1.0,
+        )));
 }
 
 /// Spawn an edge between two positions as a rectangle mesh.
@@ -59,20 +61,31 @@ fn spawn_edge(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
 ) {
-    let edge_width = 2.0;
+    let edge_width = EDGE_WIDTH_SCALE_VISIBLE;
     let midpoint = (edge_data.node_poss.0 + edge_data.node_poss.1) / 2.0;
     let direction = (edge_data.node_poss.1 - edge_data.node_poss.0).normalize();
     let distance = edge_data.node_poss.0.distance(edge_data.node_poss.1);
     let angle = direction.y.atan2(direction.x);
 
-    commands.spawn((
-        Mesh2d(meshes.add(Rectangle::new(distance, edge_width))),
-        MeshMaterial2d(materials.add(Color::WHITE)),
-        Transform::from_translation(midpoint).with_rotation(Quat::from_rotation_z(angle)),
-        UiEdge::new(edge_width),
-    ));
+    commands
+        .spawn((
+            Mesh2d(meshes.add(Rectangle::new(distance, edge_width))),
+            MeshMaterial2d(materials.add(ColorMaterial::from_color(Color::WHITE))),
+            Transform::from_translation(midpoint).with_rotation(Quat::from_rotation_z(angle)),
+            UiEdge::new(edge_width),
+            Pickable::default(),
+        ))
+        .observe(recolor_mesh_material::<Pointer<Over>>(Color::srgb(
+            1.0, 0.0, 1.0,
+        )))
+        .observe(recolor_mesh_material::<Pointer<Out>>(Color::WHITE))
+        .observe(recolor_mesh_material::<Pointer<Press>>(Color::srgb(
+            1.0, 1.0, 0.0,
+        )))
+        .observe(recolor_mesh_material::<Pointer<Release>>(Color::srgb(
+            1.0, 0.0, 1.0,
+        )));
 }
-
 /// Update the scale of edges based on the camera's zoom level to maintain consistent visual thickness.
 pub(crate) fn update_edge_scale(
     camera_query: Single<&Projection>,

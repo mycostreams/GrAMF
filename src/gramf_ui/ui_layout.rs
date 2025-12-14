@@ -1,4 +1,7 @@
+use bevy::asset::Assets;
 use bevy::color::Color;
+use bevy::ecs::system::ResMut;
+use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};
 use bevy::{
     ecs::{event::EntityEvent, observer::On, system::Query},
     prelude::Result,
@@ -24,7 +27,7 @@ pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
 }
 
 /// Recolor the sprite of an entity when an event of type E occurs on it.
-pub(crate) fn recolor_on<E: EntityEvent + Clone + Reflect>(
+pub(crate) fn recolor_sprite<E: EntityEvent + Clone + Reflect>(
     color: Color,
 ) -> impl Fn(On<E>, Query<&mut Sprite>) {
     move |ev, mut sprites| {
@@ -32,5 +35,19 @@ pub(crate) fn recolor_on<E: EntityEvent + Clone + Reflect>(
             return;
         };
         sprite.color = color;
+    }
+}
+
+/// Recolor the MeshMaterial2d of an entity when an event of type E occurs on it.
+pub(crate) fn recolor_mesh_material<E: EntityEvent + Clone + Reflect>(
+    color: Color,
+) -> impl Fn(On<E>, Query<&MeshMaterial2d<ColorMaterial>>, ResMut<Assets<ColorMaterial>>) {
+    move |ev, mesh_materials, mut color_materials| {
+        let Ok(mesh_material) = mesh_materials.get(ev.event_target()) else {
+            return;
+        };
+        if let Some(material) = color_materials.get_mut(&mesh_material.0) {
+            material.color = color;
+        }
     }
 }

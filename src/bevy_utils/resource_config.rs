@@ -1,0 +1,1 @@
+pub static EDGE_WIDTH_SCALE_VISIBLE: f32 = 2.0;
