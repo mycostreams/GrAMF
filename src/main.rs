@@ -38,15 +38,10 @@ fn main() {
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut stg_graph: ResMut<SpatioTemporalGraph>,
-) {
+fn setup(mut commands: Commands, mut stg_graph: ResMut<SpatioTemporalGraph>) {
     // Camera
     commands.spawn(Camera2d);
 
     *stg_graph = SpatioTemporalGraph::generate_simple();
-    spawn_graph(&stg_graph, &mut commands, &mut meshes, &mut materials);
+    spawn_graph(&stg_graph, &mut commands);
 }

@@ -6,8 +6,16 @@ use bevy::{
     transform::components::Transform,
 };
 
+use crate::bevy_utils::resource_config::EDGE_WIDTH_SCALE_VISIBLE;
+
 #[derive(Bundle)]
 pub struct EntityNode {
+    model: Sprite,
+    transform: Transform,
+}
+
+#[derive(Bundle)]
+pub struct EntityEdge {
     model: Sprite,
     transform: Transform,
 }
@@ -22,5 +30,27 @@ impl EntityNode {
             },
             transform: Transform::from_translation(pos),
         }
+    }
+}
+
+impl EntityEdge {
+    pub fn new(pos: Vec3, length: f32, angle: f32) -> Self {
+        EntityEdge {
+            model: Sprite {
+                color: Color::WHITE,
+                custom_size: Some(Vec2::new(length, EDGE_WIDTH_SCALE_VISIBLE)),
+                ..Default::default()
+            },
+            transform: Transform::from_translation(pos)
+                .with_rotation(bevy::math::Quat::from_rotation_z(angle)),
+        }
+    }
+    pub fn from_edge_data(edge_data: &crate::graphs::edges::EdgeData) -> Self {
+        let midpoint = (edge_data.node_poss.0 + edge_data.node_poss.1) / 2.0;
+        let direction = (edge_data.node_poss.1 - edge_data.node_poss.0).normalize();
+        let distance = edge_data.node_poss.0.distance(edge_data.node_poss.1);
+        let angle = direction.y.atan2(direction.x);
+
+        EntityEdge::new(midpoint, distance, angle)
     }
 }
