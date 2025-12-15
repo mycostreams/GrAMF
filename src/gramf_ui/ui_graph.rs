@@ -1,10 +1,7 @@
 use bevy::{
     camera::Projection,
     color::Color,
-    ecs::{
-        component::Component,
-        system::{Commands, Query, Single},
-    },
+    ecs::system::{Commands, Query, Single},
     picking::{
         events::{Out, Over, Pointer, Press, Release},
         Pickable,
@@ -13,7 +10,7 @@ use bevy::{
 };
 
 use crate::{
-    bevy_utils::graph_entities::{EntityEdge, EntityNode},
+    bevy_utils::graph_entities::{EntityEdge, EntityNode, UiEdge},
     gramf_ui::ui_layout::recolor_sprite,
     graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
@@ -62,16 +59,5 @@ pub(crate) fn update_edge_scale(
 
     for (mut transform, edge) in &mut edge_query {
         transform.scale.y = edge.base_width * proj.scale;
-    }
-}
-
-#[derive(Component)]
-pub(crate) struct UiEdge {
-    pub(crate) base_width: f32,
-}
-
-impl UiEdge {
-    pub fn new(base_width: f32) -> Self {
-        UiEdge { base_width }
     }
 }

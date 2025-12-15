@@ -1,5 +1,6 @@
 use bevy::{
     color::Color,
+    ecs::component::Component,
     math::{Vec2, Vec3},
     prelude::Bundle,
     sprite::Sprite,
@@ -18,6 +19,7 @@ pub struct EntityNode {
 pub struct EntityEdge {
     model: Sprite,
     transform: Transform,
+    data: UiEdge,
 }
 
 impl EntityNode {
@@ -43,14 +45,26 @@ impl EntityEdge {
             },
             transform: Transform::from_translation(pos)
                 .with_rotation(bevy::math::Quat::from_rotation_z(angle)),
+            data: UiEdge::new(EDGE_WIDTH_SCALE_VISIBLE),
         }
     }
-    pub fn from_edge_data(edge_data: &crate::graphs::edges::EdgeData) -> Self {
+    pub(crate) fn from_edge_data(edge_data: &crate::graphs::edges::EdgeData) -> Self {
         let midpoint = (edge_data.node_poss.0 + edge_data.node_poss.1) / 2.0;
         let direction = (edge_data.node_poss.1 - edge_data.node_poss.0).normalize();
         let distance = edge_data.node_poss.0.distance(edge_data.node_poss.1);
         let angle = direction.y.atan2(direction.x);
 
         EntityEdge::new(midpoint, distance, angle)
+    }
+}
+
+#[derive(Component)]
+pub struct UiEdge {
+    pub base_width: f32,
+}
+
+impl UiEdge {
+    pub fn new(base_width: f32) -> Self {
+        UiEdge { base_width }
     }
 }
