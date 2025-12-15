@@ -1,9 +1,6 @@
 use crate::{
-    bevy_utils::camera_controls,
-    gramf_ui::{
-        ui_graph::{spawn_graph, update_edge_scale},
-        ui_layout::ui_system,
-    },
+    bevy_utils::camera_controls::camera_controls_plugin,
+    gramf_ui::{ui_graph::spawn_graph, ui_layout::ui_system},
     graphs::stg_graph::SpatioTemporalGraph,
 };
 use bevy::prelude::*;
@@ -21,6 +18,7 @@ pub mod graphs;
 
 fn main() {
     App::new()
+        // .add_message::<ResetCameraEvent>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "GrAMF".into(),
@@ -31,8 +29,10 @@ fn main() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, camera_controls::controls)
-        .add_systems(Update, update_edge_scale)
+        // .add_systems(Update, camera_controls::controls)
+        // .add_systems(Update, update_edge_scale)
+        // .add_systems(Update, camera_controls::reset_camera)
+        .add_plugins(camera_controls_plugin)
         .add_systems(EguiPrimaryContextPass, ui_system)
         .init_resource::<SpatioTemporalGraph>()
         .run();

@@ -1,16 +1,14 @@
 use bevy::{
-    camera::Projection,
     color::Color,
-    ecs::system::{Commands, Query, Single},
+    ecs::system::Commands,
     picking::{
         events::{Out, Over, Pointer, Press, Release},
         Pickable,
     },
-    transform::components::Transform,
 };
 
 use crate::{
-    bevy_utils::graph_entities::{EntityEdge, EntityNode, UiEdge},
+    bevy_utils::graph_entities::{EntityEdge, EntityNode},
     gramf_ui::ui_layout::recolor_sprite,
     graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
 };
@@ -47,17 +45,4 @@ fn spawn_edge(edge_data: EdgeData, commands: &mut Commands) {
         .observe(recolor_sprite::<Pointer<Release>>(Color::srgb(
             1.0, 0.0, 1.0,
         )));
-}
-/// Update the scale of edges based on the camera's zoom level to maintain consistent visual thickness.
-pub(crate) fn update_edge_scale(
-    camera_query: Single<&Projection>,
-    mut edge_query: Query<(&mut Transform, &UiEdge)>,
-) {
-    let Projection::Orthographic(proj) = &*camera_query else {
-        return;
-    };
-
-    for (mut transform, edge) in &mut edge_query {
-        transform.scale.y = edge.base_width * proj.scale;
-    }
 }

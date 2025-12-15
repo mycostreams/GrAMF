@@ -11,6 +11,18 @@ use bevy::{
     window::PrimaryWindow,
 };
 
+use crate::bevy_utils::graph_entities::UiEdge;
+
+#[derive(Message)]
+pub struct ResetCameraEvent;
+
+pub(crate) fn camera_controls_plugin(app: &mut App) {
+    app.add_systems(Update, controls)
+        .add_systems(Update, reset_camera)
+        .add_message::<ResetCameraEvent>()
+        .add_systems(Update, update_edge_scale);
+}
+
 #[derive(Debug)]
 struct CameraSettings {
     translation_cont_sensitivity: f32,
@@ -102,4 +114,34 @@ fn get_origin_shift(origin_2d: Vec2, mouse_loc: Vec2, zoom: f32) -> Vec2 {
     // Get mouse position from the center
     let mouse_pos_from_cent = mouse_loc - origin_2d;
     mouse_pos_from_cent - mouse_pos_from_cent * zoom
+}
+
+/// Reset camera to default position and zoom level.
+pub(crate) fn reset_camera(
+    camera_query: Single<(&mut Transform, &mut Projection)>,
+    messages: MessageReader<ResetCameraEvent>,
+) {
+    if messages.is_empty() {
+        return;
+    }
+    let (mut transform, mut projection) = camera_query.into_inner();
+    let Projection::Orthographic(projection2d) = &mut *projection else {
+        return;
+    };
+    transform.translation = bevy::math::Vec3::ZERO;
+    projection2d.scale = 1.0;
+}
+
+/// Update the scale of edges based on the camera's zoom level to maintain consistent visual thickness.
+pub(crate) fn update_edge_scale(
+    camera_query: Single<&Projection>,
+    mut edge_query: Query<(&mut Transform, &UiEdge)>,
+) {
+    let Projection::Orthographic(proj) = &*camera_query else {
+        return;
+    };
+
+    for (mut transform, edge) in &mut edge_query {
+        transform.scale.y = edge.base_width * proj.scale;
+    }
 }

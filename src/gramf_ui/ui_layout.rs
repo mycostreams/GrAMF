@@ -1,7 +1,5 @@
-use bevy::asset::Assets;
 use bevy::color::Color;
-use bevy::ecs::system::ResMut;
-use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};
+use bevy::ecs::message::MessageWriter;
 use bevy::{
     ecs::{event::EntityEvent, observer::On, system::Query},
     prelude::Result,
@@ -9,8 +7,13 @@ use bevy::{
 use bevy::{reflect::Reflect, sprite::Sprite};
 use bevy_egui::{egui, EguiContexts};
 
+use crate::bevy_utils::camera_controls::ResetCameraEvent;
+
 /// UI layout system that defines the structure and behavior of the UI components.
-pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
+pub(crate) fn ui_system(
+    mut contexts: EguiContexts,
+    mut reset_event: MessageWriter<ResetCameraEvent>,
+) -> Result {
     let ctx = contexts.ctx_mut()?;
 
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -19,6 +22,11 @@ pub(crate) fn ui_system(mut contexts: EguiContexts) -> Result {
             egui::containers::menu::MenuButton::new("File").ui(ui, |ui| {
                 if ui.button("Quit").clicked() {
                     std::process::exit(0);
+                }
+            });
+            egui::containers::menu::MenuButton::new("View").ui(ui, |ui| {
+                if ui.button("Reset Camera").clicked() {
+                    reset_event.write(ResetCameraEvent);
                 }
             });
         });
