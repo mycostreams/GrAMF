@@ -10,11 +10,11 @@ use bevy::{
 use crate::{
     bevy_utils::graph_entities::{EntityEdge, EntityNode},
     gramf_ui::ui_layout::recolor_sprite,
-    graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SpatioTemporalGraph},
+    graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SnapshotGraph},
 };
 
 /// Spawn the entire graph: nodes and edges.
-pub(crate) fn spawn_graph(stg_graph: &SpatioTemporalGraph, commands: &mut Commands) {
+pub(crate) fn spawn_graph(stg_graph: &SnapshotGraph, commands: &mut Commands) {
     for node in stg_graph.graph.raw_nodes() {
         spawn_node(node.weight, commands);
     }

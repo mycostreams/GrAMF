@@ -1,9 +1,17 @@
-use crate::graphs::{edges::{Edge, EdgeData, EdgeProperties}, nodes::NodeData};
+use crate::graphs::{
+    edges::{Edge, EdgeData, EdgeProperties},
+    nodes::NodeData,
+};
 use bevy::prelude::Resource;
-use petgraph::graph::{UnGraph, NodeIndex};
+use petgraph::graph::{NodeIndex, UnGraph};
 use serde_json::Value;
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{BTreeSet, HashMap};
 
+/// ## Spatio-Temporal Graph (STG)
+/// A spatio-temporal graph structure that holds nodes and edges with temporal properties.
+/// The node and edge data are minimal structs optimized for graph operations.
+/// The nodes map allows quick lookup of node indices by their string IDs.
+/// The timestamps vector holds all unique timestamps present in the graph.
 #[derive(Debug, Resource, Default)]
 pub(crate) struct SpatioTemporalGraph {
     pub(crate) graph: UnGraph<NodeData, EdgeData>,
@@ -12,7 +20,9 @@ pub(crate) struct SpatioTemporalGraph {
     pub(crate) timestamps: Vec<i64>,
 }
 
-#[derive(Debug, Clone)]
+/// ## Snapshot Graph
+/// A snapshot of the spatio-temporal graph at a specific timestamp.
+#[derive(Debug, Resource, Default, Clone)]
 pub struct SnapshotGraph {
     pub(crate) graph: UnGraph<NodeData, EdgeData>,
     #[allow(dead_code)]
@@ -73,7 +83,10 @@ impl SpatioTemporalGraph {
     fn load_nodes(&mut self, node_features: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
         for feature in node_features {
             if let (Some(id_val), Some(coords)) = (
-                feature.get("properties").and_then(|p| p.get("id")).and_then(|i| i.as_str()),
+                feature
+                    .get("properties")
+                    .and_then(|p| p.get("id"))
+                    .and_then(|i| i.as_str()),
                 feature
                     .get("geometry")
                     .and_then(|g| g.get("coordinates"))
@@ -107,8 +120,14 @@ impl SpatioTemporalGraph {
                     .and_then(|g| g.get("coordinates"))
                     .and_then(|c| c.as_array()),
             ) {
-                let source = props.get("source").and_then(|s| s.as_str()).map(|s| s.to_string());
-                let target = props.get("target").and_then(|t| t.as_str()).map(|t| t.to_string());
+                let source = props
+                    .get("source")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string());
+                let target = props
+                    .get("target")
+                    .and_then(|t| t.as_str())
+                    .map(|t| t.to_string());
 
                 if let (Some(src), Some(tgt)) = (source, target) {
                     let mut time_props: HashMap<i64, EdgeProperties> = HashMap::new();
@@ -126,9 +145,7 @@ impl SpatioTemporalGraph {
                                 ts,
                                 EdgeProperties {
                                     diameter,
-                                    other: other.into_iter()
-                                        .map(|(k, v)| (k, v))
-                                        .collect(),
+                                    other: other.into_iter().map(|(k, v)| (k, v)).collect(),
                                 },
                             );
                         }
@@ -149,18 +166,23 @@ impl SpatioTemporalGraph {
     }
 
     pub fn snapshot_at(&self, timestamp: i64) -> Result<SnapshotGraph, Box<dyn std::error::Error>> {
+        // Create a new undirected graph for the snapshot
         let mut snapshot_graph = UnGraph::new_undirected();
 
+        // Add all nodes to the snapshot graph
         for node in self.graph.node_weights() {
             snapshot_graph.add_node(*node);
         }
 
         for edge in &self.edges {
+            // Check if both source and target nodes exist in the graph
             if let (Some(&src_idx), Some(&tgt_idx)) = (
                 self.nodes_map.get(&edge.source),
                 self.nodes_map.get(&edge.target),
             ) {
+                // Check if the edge has properties for the given timestamp
                 if edge.properties.contains_key(&timestamp) {
+                    // Add the edge to the snapshot graph
                     if let (Some(src_node), Some(tgt_node)) = (
                         self.graph.node_weight(src_idx),
                         self.graph.node_weight(tgt_idx),
@@ -183,7 +205,11 @@ impl SpatioTemporalGraph {
         })
     }
 
-    pub fn connected_subgraph(&self, start_node: NodeIndex, timestamp: i64) -> Result<Vec<NodeIndex>, Box<dyn std::error::Error>> {
+    pub fn connected_subgraph(
+        &self,
+        start_node: NodeIndex,
+        timestamp: i64,
+    ) -> Result<Vec<NodeIndex>, Box<dyn std::error::Error>> {
         let snapshot = self.snapshot_at(timestamp)?;
         let mut visited = std::collections::HashSet::new();
         let mut queue = std::collections::VecDeque::new();
@@ -242,6 +268,46 @@ impl SpatioTemporalGraph {
         );
 
         stg.timestamps = vec![1000000000000000000i64];
+
+        stg
+    }
+}
+
+impl SnapshotGraph {
+    pub fn new() -> Self {
+        SnapshotGraph {
+            graph: UnGraph::new_undirected(),
+            timestamp: 0,
+        }
+    }
+
+    pub fn generate_simple() -> Self {
+        let mut stg = SnapshotGraph::new();
+
+        let nodes = [
+            NodeData {
+                pos: (10.0, 0.0, 0.0).into(),
+                id: 0,
+            },
+            NodeData {
+                pos: (0.0, 10.0, 0.0).into(),
+                id: 1,
+            },
+            NodeData {
+                pos: (10.0, 10.0, 0.0).into(),
+                id: 2,
+            },
+        ];
+
+        stg.graph.add_edge(
+            NodeIndex::new(0),
+            NodeIndex::new(1),
+            EdgeData {
+                node_poss: (nodes[0].pos, nodes[1].pos),
+            },
+        );
+
+        stg.timestamp = 1000000000000000000i64;
 
         stg
     }

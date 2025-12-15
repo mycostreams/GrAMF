@@ -1,7 +1,7 @@
 use crate::{
     bevy_utils::camera_controls::camera_controls_plugin,
     gramf_ui::{ui_graph::spawn_graph, ui_layout::ui_system},
-    graphs::stg_graph::SpatioTemporalGraph,
+    graphs::stg_graph::SnapshotGraph,
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -31,14 +31,15 @@ fn main() {
         .add_systems(Startup, setup)
         .add_plugins(camera_controls_plugin)
         .add_systems(EguiPrimaryContextPass, ui_system)
-        .init_resource::<SpatioTemporalGraph>()
+        .init_resource::<SnapshotGraph>()
         .run();
 }
 
-fn setup(mut commands: Commands, mut stg_graph: ResMut<SpatioTemporalGraph>) {
+fn setup(mut commands: Commands, mut stg_graph: ResMut<SnapshotGraph>) {
     // Camera
     commands.spawn(Camera2d);
 
-    *stg_graph = SpatioTemporalGraph::generate_simple();
+    *stg_graph = SnapshotGraph::generate_simple();
+
     spawn_graph(&stg_graph, &mut commands);
 }
