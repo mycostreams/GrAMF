@@ -1,10 +1,17 @@
 use bevy::math::Vec3;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Copy)]
+#[derive(Debug, Clone, Default, Copy, Serialize, Deserialize)]
 pub(crate) struct NodeData {
     pub(crate) pos: Vec3,
     pub(crate) id: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node {
+    pub id: String,
+    pub coordinates: (f64, f64),
 }
 
 impl From<NodeData> for NodeIndex {
