@@ -299,6 +299,11 @@ impl SnapshotGraph {
             },
         ];
 
+
+        for node in nodes.iter() {
+            stg.graph.add_node(*node);
+        }
+
         stg.graph.add_edge(
             NodeIndex::new(0),
             NodeIndex::new(1),

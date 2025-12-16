@@ -1,4 +1,4 @@
-use bevy::math::Vec3;
+use bevy::{ecs::component::Component, math::Vec3};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -13,7 +13,7 @@ impl EdgeData {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Component)]
 pub struct EdgeProperties {
     pub diameter: Option<f64>,
     #[serde(flatten)]

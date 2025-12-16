@@ -1,9 +1,8 @@
 use bevy::{
     color::Color,
-    ecs::system::Commands,
+    ecs::{name::Name, system::Commands},
     picking::{
-        events::{Out, Over, Pointer, Press, Release},
-        Pickable,
+        Pickable, events::{Out, Over, Pointer, Press, Release}
     },
 };
 
@@ -26,7 +25,7 @@ pub(crate) fn spawn_graph(stg_graph: &SnapshotGraph, commands: &mut Commands) {
 /// Spawn a node at its position with pickable and recoloring behavior.
 fn spawn_node(node: NodeData, commands: &mut Commands) {
     commands
-        .spawn((EntityNode::new(node.pos), Pickable::default()))
+        .spawn((Name::new("Node"), EntityNode::new(node.pos), Pickable::default()))
         .observe(recolor_sprite::<Pointer<Over>>(Color::srgb(0.0, 1.0, 1.0)))
         .observe(recolor_sprite::<Pointer<Out>>(Color::WHITE))
         .observe(recolor_sprite::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
@@ -38,7 +37,7 @@ fn spawn_node(node: NodeData, commands: &mut Commands) {
 /// Spawn an edge between two positions as a rectangle mesh.
 fn spawn_edge(edge_data: EdgeData, commands: &mut Commands) {
     commands
-        .spawn((EntityEdge::from_edge_data(&edge_data), Pickable::default()))
+        .spawn((Name::new("Edge"), EntityEdge::from_edge_data(&edge_data), Pickable::default()))
         .observe(recolor_sprite::<Pointer<Over>>(Color::srgb(1.0, 0.0, 1.0)))
         .observe(recolor_sprite::<Pointer<Out>>(Color::WHITE))
         .observe(recolor_sprite::<Pointer<Press>>(Color::srgb(1.0, 1.0, 0.0)))
