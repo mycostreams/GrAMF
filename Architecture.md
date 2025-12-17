@@ -10,6 +10,7 @@ We can then represent the components of an STG as such:
 - Edges
     - Source node ID
     - Target node ID
+    - Hyperedge ID
     - Hashmap with timepoint keys
         - Width (float)
         - Length (float)
@@ -22,7 +23,7 @@ The above also assumes that the source and target node are represented in a way 
 
 Finally, activity can also be an invariant, as we can set the length and width of inactive nodes to 0.0. In the future, we might want to represent septated hyphae as inactive, so I think it is still important to represent it this way. 
 
-There are a whole host of extra features and data that are stored in the stg's, which we might want to put on the edge as a simple dict. One more important property is the hyperedge, which is a single edge connected to many other edges. 
+There are a whole host of extra features and data that are stored in the stg's, which we might want to put on the edge as a simple dict. One more important property is the hyperedge, which is a single edge connected to many other edges. This property is used in a lot of spatial graph analysis pipelines, and is important to get right. We might still want to keep this empty, or at -1. 
 
 ## Snapshot Graph Architecture
 The snapshot should not contain any temporal data to make it as simple in memory as possible. 
@@ -32,8 +33,23 @@ The snapshot should not contain any temporal data to make it as simple in memory
 - Edges
     - Source node ID
     - Target node ID
+    - Hyperedge ID
     - Width
     - Length
     - Properties (dict[str, Value])
 
-One important snapshot that we can get consistently is to get the graph at a certain timestamp. This is why there is no activation in the snapshot graph. 
+For now, we should focus on three types of snapshot graphs:
+### Timestamp Snapshot
+This snapshot would EITHER give us only the edges that exist at a certain time point, leading to less memory usage, OR it still gives all of the edges, with a specific color coding (inactive edges a pale gray, the rest colored according to the selected colormap). 
+
+### Growth Snapshot
+This snapshot uses two timestamps, and needs to have a 'growth' parameter on all edges. 
+
+### Full Graph snapshot
+This shapshot ignores the active bool, and presents us with ALL nodes and edges in the graph.
+
+## Additional calculated parameters
+We will have to experiment with additionally calculated parameters in the graph, as they can either be stored in the snapshot dict, or they can be stored in the ECS system of the game engine. 
+
+## Regular workflow
+We expect to be doing the following workflow: We select a graph edge, and are able to see its parameters. we can edit these as well, maybe just with a button, or a click on the parameter itself. 
