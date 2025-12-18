@@ -1,7 +1,5 @@
 // Time series type. Measures seconds since UNIX epoch.
 
-use crate::graphs::edges::{Edge, EdgeProperties};
-
 /// A time-series type for storing a consecutive set of temporal data.
 #[derive(Debug, Clone)]
 pub struct TimeSeries<T> {
