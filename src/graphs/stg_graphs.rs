@@ -1,8 +1,9 @@
 use crate::graphs::{
     edges::{Edge, EdgeData, EdgeProperties},
-    nodes::NodeData, types::TimeSeries,
+    nodes::NodeData,
+    types::TimeSeries,
 };
-use bevy::{prelude::Resource};
+use bevy::prelude::Resource;
 use petgraph::graph::{NodeIndex, UnGraph};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
@@ -111,7 +112,9 @@ impl SpatioTemporalGraph {
     fn load_edges(&mut self, edge_features: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
         for feature in edge_features {
             if let (Some(props), _coords) = (
-                feature.get("properties").and_then(|p: &Value| p.as_object()),
+                feature
+                    .get("properties")
+                    .and_then(|p: &Value| p.as_object()),
                 feature
                     .get("geometry")
                     .and_then(|g| g.get("coordinates"))
@@ -127,10 +130,11 @@ impl SpatioTemporalGraph {
                     .map(|t| t.to_string());
 
                 if let (Some(src), Some(tgt)) = (source, target) {
-                    let mut time_props: TimeSeries<EdgeProperties> = TimeSeries::from_len(self.timestamps.len());
+                    let mut time_props: TimeSeries<EdgeProperties> =
+                        TimeSeries::from_len(self.timestamps.len());
 
                     for (key, value) in props {
-                        if let Ok(_) = key.parse::<i64>() {
+                        if key.parse::<i64>().is_ok() {
                             let diameter = value.get("diameter").and_then(|d| d.as_f64());
                             let other = if let Value::Object(map) = value {
                                 map.clone()
@@ -138,12 +142,10 @@ impl SpatioTemporalGraph {
                                 serde_json::Map::new()
                             };
 
-                            time_props.push(
-                                EdgeProperties {
-                                    diameter,
-                                    other: other.into_iter().collect(),
-                                },
-                            );
+                            time_props.push(EdgeProperties {
+                                diameter,
+                                other: other.into_iter().collect(),
+                            });
                         }
                     }
 

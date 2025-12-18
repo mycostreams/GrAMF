@@ -16,6 +16,8 @@ pub mod gramf_ui;
 /// Graphs module containing various graph implementations and related structures.
 pub mod graphs;
 
+pub mod io;
+
 fn main() {
     App::new()
         // .add_message::<ResetCameraEvent>()

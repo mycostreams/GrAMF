@@ -1,24 +1,28 @@
 // Time series type. Measures seconds since UNIX epoch.
 
+use crate::graphs::edges::{Edge, EdgeProperties};
+
 /// A time-series type for storing a consecutive set of temporal data.
 #[derive(Debug, Clone)]
 pub struct TimeSeries<T> {
     pub timestamps: Vec<T>,
 }
 
-
 /// Implementations for TimeSeries
 impl<T> TimeSeries<T> {
+    /// Initialize a TimeSeries from a vector of timestamps
     pub fn from_vec(timestamps: Vec<T>) -> Self {
         TimeSeries { timestamps }
     }
 
+    /// Initialize a TimeSeries with a given length
     pub fn from_len(len: usize) -> Self {
         TimeSeries {
             timestamps: Vec::with_capacity(len),
         }
     }
 
+    /// Initialize a TimeSeries from a sparse map of timestamps
     pub fn from_sparse_map(
         sparse_map: &std::collections::HashMap<i64, T>,
         len: usize,
@@ -53,7 +57,7 @@ impl<T> TimeSeries<T> {
             self.timestamps[index] = value;
         }
     }
-    
+
     pub fn push(&mut self, value: T) {
         self.timestamps.push(value);
     }
