@@ -2,13 +2,15 @@ use bevy::{ecs::component::Component, math::Vec3};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::graphs::types::TimeSeries;
+
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct EdgeData {
-    pub(crate) node_poss: (Vec3, Vec3),
+pub struct EdgeData {
+    pub node_poss: (Vec3, Vec3),
 }
 
 impl EdgeData {
-    fn length(&self) -> f32 {
+    pub fn length(&self) -> f32 {
         (self.node_poss.1 - self.node_poss.0).length()
     }
 }
@@ -24,7 +26,7 @@ pub struct EdgeProperties {
 pub struct Edge {
     pub source: String,
     pub target: String,
-    pub properties: HashMap<i64, EdgeProperties>,
+    pub properties: TimeSeries<EdgeProperties>,
 }
 
 #[test]
