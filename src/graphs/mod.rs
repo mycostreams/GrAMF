@@ -1,3 +1,3 @@
-pub mod STG_graph;
+pub mod stg_graphs;
 pub mod edges;
 pub mod nodes;
