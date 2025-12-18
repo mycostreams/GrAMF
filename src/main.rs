@@ -1,7 +1,7 @@
 use crate::{
     bevy_utils::camera_controls::camera_controls_plugin,
     gramf_ui::{ui_graph::spawn_graph, ui_layout::ui_system},
-    graphs::stg_graph::SnapshotGraph,
+    graphs::STG_graph::SnapshotGraph,
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};

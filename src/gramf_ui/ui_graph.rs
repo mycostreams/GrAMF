@@ -10,7 +10,7 @@ use bevy::{
 use crate::{
     bevy_utils::graph_entities::{EntityEdge, EntityNode},
     gramf_ui::ui_layout::recolor_sprite,
-    graphs::{edges::EdgeData, nodes::NodeData, stg_graph::SnapshotGraph},
+    graphs::{edges::EdgeData, nodes::NodeData, STG_graph::SnapshotGraph},
 };
 
 /// Spawn the entire graph: nodes and edges.
