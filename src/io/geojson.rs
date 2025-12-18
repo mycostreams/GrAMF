@@ -1,6 +1,6 @@
 use geojson::GeoJson;
 
-use crate::io::stg_graph_io::parse_stg_feature_collection;
+use crate::io::stg_graph_io::{parse_stg_feature_collection, Metadata};
 
 enum GraphTypes {
     Stg,
@@ -15,7 +15,7 @@ pub fn load_geojson_from_path<P: AsRef<std::path::Path>>(
     Ok(geojson)
 }
 
-pub fn parse_geojson_to_graphs(geojson: &GeoJson) -> Result<(), Box<dyn std::error::Error>> {
+pub fn parse_geojson_to_graphs(geojson: &GeoJson) -> Result<Metadata, Box<dyn std::error::Error>> {
     match geojson {
         GeoJson::FeatureCollection(fc) => parse_feature_collection(fc),
         _ => Err("Expected a FeatureCollection".into()),
@@ -43,7 +43,7 @@ fn determine_graph_type(
 
 pub fn parse_feature_collection(
     fc: &geojson::FeatureCollection,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Metadata, Box<dyn std::error::Error>> {
     match determine_graph_type(fc)? {
         GraphTypes::Stg => parse_stg_feature_collection(fc),
         GraphTypes::PlateImage => Err("PlateImage parsing not implemented".into()),
@@ -65,12 +65,8 @@ fn test_load_geojson_from_path() {
     assert!(matches!(geojson, GeoJson::FeatureCollection(_)));
     match geojson {
         GeoJson::FeatureCollection(fc) => {
-            if let Some(fm) = &fc.foreign_members {
-                if let Some(metadata_val) = fm.get("metadata") {
-                    // metadata_val is &serde_json::Value
-                    println!("metadata: {}", metadata_val);
-                }
-            }
+            let metadata = parse_stg_feature_collection(&fc).unwrap();
+            print!("{:?}", metadata);
         }
         _ => panic!("Expected a FeatureCollection"),
     }

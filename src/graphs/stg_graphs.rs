@@ -1,7 +1,10 @@
-use crate::graphs::{
-    edges::{Edge, EdgeData, EdgeProperties},
-    nodes::NodeData,
-    types::TimeSeries,
+use crate::{
+    graphs::{
+        edges::{Edge, EdgeData, EdgeProperties},
+        nodes::NodeData,
+        types::TimeSeries,
+    },
+    io::stg_graph_io::Metadata,
 };
 use bevy::prelude::Resource;
 use petgraph::graph::{NodeIndex, UnGraph};
@@ -19,6 +22,7 @@ pub struct SpatioTemporalGraph {
     pub nodes_map: HashMap<String, NodeIndex>,
     pub edges: Vec<Edge>,
     pub timestamps: Vec<i64>,
+    pub metadata: Metadata,
 }
 
 /// ## Snapshot Graph
@@ -36,6 +40,7 @@ impl SpatioTemporalGraph {
             nodes_map: HashMap::new(),
             edges: Vec::new(),
             timestamps: Vec::new(),
+            metadata: Metadata::default(),
         }
     }
 

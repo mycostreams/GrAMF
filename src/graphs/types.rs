@@ -1,7 +1,7 @@
 // Time series type. Measures seconds since UNIX epoch.
 
 /// A time-series type for storing a consecutive set of temporal data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TimeSeries<T> {
     pub timestamps: Vec<T>,
 }
