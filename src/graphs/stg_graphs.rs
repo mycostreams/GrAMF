@@ -114,7 +114,7 @@ impl SpatioTemporalGraph {
     fn load_edges(&mut self, edge_features: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
         for feature in edge_features {
             if let (Some(props), _coords) = (
-                feature.get("properties").and_then(|p| p.as_object()),
+                feature.get("properties").and_then(|p: &Value| p.as_object()),
                 feature
                     .get("geometry")
                     .and_then(|g| g.get("coordinates"))
@@ -145,7 +145,7 @@ impl SpatioTemporalGraph {
                                 ts,
                                 EdgeProperties {
                                     diameter,
-                                    other: other.into_iter().map(|(k, v)| (k, v)).collect(),
+                                    other: other.into_iter().collect(),
                                 },
                             );
                         }
@@ -298,7 +298,6 @@ impl SnapshotGraph {
                 id: 2,
             },
         ];
-
 
         for node in nodes.iter() {
             stg.graph.add_node(*node);
