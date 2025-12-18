@@ -299,7 +299,6 @@ impl SnapshotGraph {
             },
         ];
 
-
         for node in nodes.iter() {
             stg.graph.add_node(*node);
         }
