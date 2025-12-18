@@ -7,8 +7,8 @@ Users must be able to modify topology and temporal variables and persist these c
 Proposed change
 ---
 - Add an `EditLayer` or `user_edits` overlay to STG representation (small diff objects: edge_id/node_id, field, old_value, new_value, metadata).
-- Extend I/O to serialize both `raw` and `user_edits`, and to load & merge overlays on demand.
-- Add CLI/UI 'Save' and 'Export merged' options.
+- Persist edits as a sidecar file (e.g., `project.gramf-edits.json`) containing small JSON diffs with provenance (author, timestamp, source snapshot/time).
+- Extend I/O to load sidecar overlays on demand and to merge/apply overlays when requested; add CLI/UI 'Save' and 'Export merged' options.
 
 Files to edit
 ---

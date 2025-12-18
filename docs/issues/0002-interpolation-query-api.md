@@ -7,19 +7,22 @@ Snapshots currently require exact timestamp matches. We need interpolation and a
 Proposed change
 ---
 - Add `fn interpolate_edge_properties(&self, edge_id, time: f64) -> Option<EdgeProperties>`.
-  - When returning interpolated properties include computed `real_length = base_length * progress`.
-- Add `fn snapshot_at(&self, time: f64) -> SnapshotGraph` that uses interpolation and that computes per-edge real lengths from `base_length` and interpolated progress.
+  - When returning interpolated properties include computed `real_length = base_length(node_positions) * progress` and prefer progress-based interpolation to avoid sudden categorical jumps (linear interpolation on numeric `progress`).
+- Add `fn snapshot_at(&self, time: f64) -> SnapshotGraph` that uses interpolation and computes per-edge `real_length` from node positions and interpolated `progress`.
 - Add `fn slice(&self, t0: f64, t1: f64) -> SpatioTemporalGraph` & `fn diff(t0,t1)`.
-- Add `fn growth_between(&self, t0: f64, t1: f64) -> GrowthSnapshot` with growth per-edge computed as:
-    growth(edge) = base_length * (progress(t1) - progress(t0))
-  and source/target markings.
+- Add `fn growth_between(&self, t0: f64, t1: f64) -> GrowthSnapshot` with growth per-edge computed as raw deltas and rates:
+    - raw_length_delta = base_length(node_positions) * (progress(t1) - progress(t0))
+    - width_delta = width(t1) - width(t0)
+    - length_rate = raw_length_delta / (t1 - t0)
+    - width_rate = width_delta / (t1 - t0)
+  and source/target markings. Growth is signed (positive => extension).
 
 Exact index API (no interpolation)
 ---
-- Add `fn edge_properties_at_index(&self, edge_id, idx: usize) -> Option<EdgeProperties>` — returns the stored value at the exact time index or `None` if missing. Also expose `real_length_at_index = base_length * progress_at_index`.
+- Add `fn edge_properties_at_index(&self, edge_id, idx: usize) -> Option<EdgeProperties>` — returns the stored value at the exact time index or `None` if missing. Also expose `real_length_at_index = base_length(node_positions) * progress_at_index` (computed on demand).
 - Add `fn snapshot_at_index(&self, idx: usize) -> SnapshotGraph` — builds a snapshot using the exact aligned `time_keys[idx]`.
 - Add `fn slice_indices(&self, i0: usize, i1: usize) -> SpatioTemporalGraph` — index-aligned slice (inclusive/exclusive semantics documented).
-- Add `fn growth_between_indices(&self, i0: usize, i1: usize) -> GrowthSnapshot` — growth computed from exact indices without interpolation using base_length * (progress1 - progress0).
+- Add `fn growth_between_indices(&self, i0: usize, i1: usize) -> GrowthSnapshot` — growth computed from exact indices without interpolation using `raw_length_delta = base_length(node_positions) * (progress1 - progress0)` and width delta; also provide rate helpers (delta / Δseconds).
 
 Files to edit
 ---
@@ -30,16 +33,16 @@ Files to edit
 
 Acceptance criteria
 ---
-- Interpolation returns expected numeric interpolations in unit tests, and `real_length` matches `base_length * progress`.
+- Interpolation returns expected numeric interpolations in unit tests, and `real_length` matches `base_length(node_positions) * progress`.
 - Fractional snapshot generation produces a `SnapshotGraph` with interpolated properties, activity flags, and computed `real_length`.
-- Growth computation matches `base_length * (progress1 - progress0)` semantics and marks growth direction.
+- Growth computation produces raw deltas and per-time-unit rates for length and width and marks growth direction (signed).
 - Index-based API returns exact stored values with no interpolation and handles out-of-range indices deterministically (returns `None` or an `Err` as documented).
 
 Tasks
 ---
-- [ ] Implement interpolation helper (linear numeric interpolation policy).
-- [ ] Decide and document boolean semantics for `active`.
-- [ ] Write unit tests for interpolation, edge-case (before/after bounds), and growth.
+- [ ] Implement interpolation helper (prefer numeric `progress` linear interpolation; define fallback categorical semantics).
+- [ ] Document `EdgeState` interpolation policy and boolean-like semantics.
+- [ ] Write unit tests for interpolation, edge-case (before/after bounds), and growth (including raw deltas and per-time-unit rates).
 - [ ] Implement index-based API functions and add tests for exact-match semantics and out-of-range handling.
 - [ ] Update docs to show both float-time and index-based usage examples.
 
@@ -48,8 +51,8 @@ Tasks / Tests to add
 ---
 - [ ] Unit tests for TimeSeries conversion and alignment.
 - [ ] Unit tests for interpolation behavior.
-- [ ] Unit tests that verify `real_length = base_length * progress` across indices and fractional times.
-- [ ] Tests for growth computation using `base_length * (progress1 - progress0)`.
+- [ ] Unit tests that verify `real_length = base_length(node_positions) * progress` across indices and fractional times.
+- [ ] Tests for growth computation returning raw deltas and rates using `base_length(node_positions) * (progress1 - progress0)`.
 - [ ] Fixtures: small STG examples where `base_length` is provided and time_data contains only state/progress/width; expected CSV exports should include computed real lengths.
 
 

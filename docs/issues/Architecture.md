@@ -27,13 +27,13 @@ Notes:
   - RegrowingAfterSeptation (progress: float in [0.0, 1.0])
 
 Notes:
-- Length is now a time-invariant property on the edge (call it `base_length`: float).
+- `base_length` is derived from the positions of its source and target nodes (computed on demand from node coordinates). Node positions are constant; callers should compute `base_length` when needed and may cache it for performance.
 - Real (time-varying) length of an edge is calculated as:
-  real_length(t) = base_length * progress(t)
-  where progress(t) is derived from the EdgeState at time t (states map to progress in [0,1]; categorical-only states map to 0 or 1).
-- Storage: per-time-index entries store state/progress and time-varying fields like width. Do not duplicate `base_length` across time entries. Example JSON shows `base_length` at the edge level.
-- Semantics: states with progress expose a numeric progress value in [0,1], used in interpolation and real length calculation. For interpolation between time keys, interpolate numeric progress linearly. Categorical-only states map to progress 0 (NotGrownYet / FullySeptated) or 1 (FullyGrown) for interpolation purposes.
-- Activity: edges that are NotGrownYet or FullySeptated are considered inactive; callers may treat real_length==0 as inactive where desired.
+  real_length(t) = base_length(node_positions) * progress(t)
+  where `progress(t)` is derived from the `EdgeState` at time t (states map to progress in [0,1]; states with an explicit progress value are preferred for interpolation to avoid sudden jumps).
+- Storage: per-time-index entries store `state/progress` and other time-varying fields like `width`. Do not duplicate `base_length` across time entries; it is derived, not required to be stored.
+- Semantics: when interpolating between time keys prefer numeric `progress` values (linear interpolation). When `progress` is unavailable, fallback to nearest-side categorical semantics documented in the API.
+- Activity: edges in `NotGrownYet` or `FullySeptated` are considered inactive; callers may treat `real_length == 0` as inactive where desired.
 
 There are a whole host of extra features and data that are stored in the stg's, which we might want to put on the edge as a simple dict. One more important property is the hyperedge, which is a single edge connected to many other edges. This property is used in a lot of spatial graph analysis pipelines, and is important to get right. We might still want to keep this empty, or at -1. 
 
@@ -55,8 +55,11 @@ Snapshot types (semantics updated):
   - Represents the graph at a single global timestamp (referenced by its time index).
   - Implementation choice: full graph (all nodes/edges present ever) but properties taken from the selected time index and colored/marked for activity. This enables the full topology to be available and time-variant data to be loaded lazily.
 - Growth Snapshot
-  - Uses two time indices (t0, t1). Growth for an edge is computed from the raw data as length(t1) - length(t0). Source nodes denote growth start and target nodes denote growth end.
-  - Growth may also be represented normalized by interval length if required.
+  - Uses two time indices (t0, t1). Growth for an edge is computed from the raw data as the change in `real_length` and in `width` between the two indices. Concretely:
+    - raw_length_delta = base_length(node_positions) * (progress(t1) - progress(t0))
+    - width_delta = width(t1) - width(t0)
+  - In addition to raw deltas, provide helper functions to compute **growth rate** per time unit: rate = delta / (t1 - t0) (seconds), for both length and width.
+  - Growth is signed (positive = extension/increase, negative = retraction/decrease). Do not normalize growth by interval unless explicitly requested by the caller.
 - Full Graph Snapshot
   - Presents full topology (all nodes and edges observed across time); time-variant properties are omitted or set to a "not-loaded" state and can be fetched by time index on demand.
 
@@ -68,8 +71,10 @@ We expect to be doing the following workflow: We select a graph edge, and are ab
 
 ## Time and storage conventions
 - Store an ordered list of global timestamps at the graph metadata level (time_keys: [t0, t1, ...]). Per-edge time data should be arrays aligned to these indices or sparse arrays referencing indices.
-- Interpolation: linear between adjacent stored snapshots.
-- Lazy-loading: full graph topology is available immediately; time-indexed property arrays may be loaded on demand to save memory and I/O.
+- Interpolation: prefer numeric `progress` values and interpolate linearly between adjacent stored snapshots; fallback semantics documented when `progress` is missing.
+- Lazy-loading: full graph topology is available immediately; time-indexed property arrays may be loaded on demand to save memory and I/O. For large files, prefer memory-mapped or chunked binary layouts and an LRU cache for loaded chunks.
+- Persistence: user edits are stored as **sidecar** overlays (e.g., `.gramf-edits.json`) that contain small diffs with provenance metadata; these can be applied on load or ignored according to user preference.
+- Concurrency: heavy IO and compute work (lazy loading, simulations) must run off the main Bevy thread (thread pool or async tasks) and push updates back into ECS safely when complete.
 
 ## Example minimal STG JSON (recommended pattern)
 {
@@ -85,7 +90,6 @@ We expect to be doing the following workflow: We select a graph edge, and are ab
       "source": 1,
       "target": 2,
       "edge_cluster": null,
-      "base_length": 1.2,                             // invariant length in meters (or documented unit)
       "time_data": [
         { "width": 0.0, "state": "NotGrownYet" },            
         { "width": 0.02, "state": "Growing", "progress": 0.25 }, 
@@ -93,5 +97,6 @@ We expect to be doing the following workflow: We select a graph edge, and are ab
       ]
     }
   ],
+  // `base_length` is computed from node positions on demand; not required in the JSON.
   "schema_version": "1.0"
 }

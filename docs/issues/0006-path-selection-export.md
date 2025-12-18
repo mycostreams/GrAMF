@@ -9,7 +9,7 @@ Proposed change
 - Add UI path selection (click-to-add edges or select a precomputed path between nodes).
 - Add interaction: Ctrl+Left-Click computes the shortest path between the last-selected element and the clicked element and highlights it. Consecutive Ctrl+Left-Clicks extend the current path from its current end to the newly clicked element.
 - Provide a view showing variables along the path (table and simple plot). Variables should include computed values such as:
-  - base_length, progress, real_length (= base_length * progress), width, edge id, source/target.
+  - base_length (computed from node positions), progress, real_length (= base_length * progress), width, edge id, source/target.
 - Add CSV export utility and an export UI action. CSVs must include metadata (time_keys / time_idx used, units, schema_version, export provenance).
 
 Files to edit/add

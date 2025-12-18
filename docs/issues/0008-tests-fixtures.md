@@ -7,7 +7,7 @@ Robust tests and clear fixtures are required to maintain correctness (interpolat
 Proposed change
 ---
 - Add fixtures in `tests/fixtures/sample_stg.json` with sparse and dense time-data cases and growth scenarios.
-- Add unit tests for `TimeSeries`, interpolation, growth, slice/diff, edit persistence, and CSV export.
+- Add unit tests for `TimeSeries`, interpolation (prefer `progress`-based interpolation), growth raw deltas and per-time-unit rates, slice/diff, edit persistence, and CSV export.
 - Add an examples directory with a small STG and scripts/docs describing the new schema and usage.
 
 Files to edit/add

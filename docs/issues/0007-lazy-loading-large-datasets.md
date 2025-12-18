@@ -7,8 +7,8 @@ Large STG datasets require memory- and IO-efficient strategies. Lazy-loading (on
 Proposed change
 ---
 - Introduce `TimeDataHandle` enum: `InMemory`, `Lazy(FileRef)`, `Mmap(Arc<Mmap>)`.
-- Add background loader API to fetch `TimeSeries` chunks on-demand and integrate with ECS via futures or thread-pool.
-- Define a simple compact on-disk layout (index + per-edge blocks) or recommend memory-mapped NDJSON/binary layout.
+- Add background loader API to fetch `TimeSeries` chunks on-demand and integrate with ECS via futures or a thread-pool; ensure loader tasks do not run on the Bevy main thread and results are applied via safe ECS events.
+- Define a simple compact on-disk layout (index + per-edge blocks) or recommend memory-mapped NDJSON/binary layout, and an LRU cache strategy for loaded chunks.
 
 Files to edit/add
 ---
