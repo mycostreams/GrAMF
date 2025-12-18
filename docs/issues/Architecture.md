@@ -11,21 +11,29 @@ We can then represent the components of an STG as such:
     - Source node ID
     - Target node ID
     - Edge cluster ID (see below)
+    - Length (float)
     - Hashmap / list indexed by time indices
         - Width (float)
-        - Length (float)
-        - Active (bool)
+        - State (EdgeState)            # was: Active (bool)
         - Properties (dict[str, Value])
 
 Notes:
-- "Edge cluster" replaces "hyperedge". An edge cluster is a continuous path (like a highway in a street graph) and groups edges that act as a single, continuous structure. Use null for an undefined cluster index.
-- Time keys are global and stored in graph-level metadata as an ordered list of timestamps. Edge time-variant data should refer to these timestamps by simple integer indices (0, 1, 2, ...). This is a performance-friendly representation and keeps per-edge storage compact.
-- We assume linear interpolation between adjacent snapshots (global policy). When querying values at an arbitrary time, linearly interpolate using the two nearest time indices.
-- Length is conceptually time-varying (stored per time-index) but may be treated as invariant if not present for all indices.
+- EdgeState (time-varying enum): one of:
+  - NotGrownYet
+  - Growing (progress: float in [0.0, 1.0])
+  - FullyGrown
+  - Septating (progress: float in [0.0, 1.0])
+  - FullySeptated
+  - RegrowingAfterSeptation (progress: float in [0.0, 1.0])
 
-The above also assumes that the source and target node are represented in a way to show growth source and growth target. 
-
-Finally, activity can also be an invariant, as we can set the length and width of inactive nodes to 0.0. In the future, we might want to represent septated hyphae as inactive, so I think it is still important to represent it this way. 
+Notes:
+- Length is now a time-invariant property on the edge (call it `base_length`: float).
+- Real (time-varying) length of an edge is calculated as:
+  real_length(t) = base_length * progress(t)
+  where progress(t) is derived from the EdgeState at time t (states map to progress in [0,1]; categorical-only states map to 0 or 1).
+- Storage: per-time-index entries store state/progress and time-varying fields like width. Do not duplicate `base_length` across time entries. Example JSON shows `base_length` at the edge level.
+- Semantics: states with progress expose a numeric progress value in [0,1], used in interpolation and real length calculation. For interpolation between time keys, interpolate numeric progress linearly. Categorical-only states map to progress 0 (NotGrownYet / FullySeptated) or 1 (FullyGrown) for interpolation purposes.
+- Activity: edges that are NotGrownYet or FullySeptated are considered inactive; callers may treat real_length==0 as inactive where desired.
 
 There are a whole host of extra features and data that are stored in the stg's, which we might want to put on the edge as a simple dict. One more important property is the hyperedge, which is a single edge connected to many other edges. This property is used in a lot of spatial graph analysis pipelines, and is important to get right. We might still want to keep this empty, or at -1. 
 
@@ -64,11 +72,10 @@ We expect to be doing the following workflow: We select a graph edge, and are ab
 - Lazy-loading: full graph topology is available immediately; time-indexed property arrays may be loaded on demand to save memory and I/O.
 
 ## Example minimal STG JSON (recommended pattern)
-```json
 {
   "id": "stg-001",
   "time_unit": "s",
-  "time_keys": [0.0, 1.0, 2.0],
+  "time_keys": [0, 3600, 7200],
   "nodes": [
     { "id": 1, "pos": [0.0, 1.0, 0.0] }
   ],
@@ -78,12 +85,13 @@ We expect to be doing the following workflow: We select a graph edge, and are ab
       "source": 1,
       "target": 2,
       "edge_cluster": null,
+      "base_length": 1.2,                             // invariant length in meters (or documented unit)
       "time_data": [
-        { "length": 0.5, "width": 0.02, "active": true },  // index 0 -> time_keys[0]
-        { "length": 1.2, "width": 0.02, "active": true },  // index 1 -> time_keys[1]
-        null                                                // index 2 -> not recorded / inactive
+        { "width": 0.0, "state": "NotGrownYet" },            
+        { "width": 0.02, "state": "Growing", "progress": 0.25 }, 
+        { "width": 0.02, "state": "FullyGrown", "progress": 1.0 }             
       ]
     }
   ],
   "schema_version": "1.0"
-}```
+}
