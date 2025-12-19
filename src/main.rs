@@ -16,8 +16,8 @@ pub mod gramf_ui;
 /// Graphs module containing various graph implementations and related structures.
 pub mod graph_model;
 
-pub mod io;
 pub mod db;
+pub mod io;
 
 fn main() {
     App::new()

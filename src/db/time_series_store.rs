@@ -21,10 +21,7 @@ where
         }
     }
 
-    pub fn get(
-        &mut self,
-        edge_id: u64,
-    ) -> anyhow::Result<Option<&TimeSeries<T>>> {
+    pub fn get(&mut self, edge_id: u64) -> anyhow::Result<Option<&TimeSeries<T>>> {
         if self.cache.contains(&edge_id) {
             return Ok(self.cache.get(&edge_id));
         }

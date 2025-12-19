@@ -1,6 +1,6 @@
+use crate::graph_model::types::TimeSeries;
 use bevy::math::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::graph_model::types::TimeSeries;
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct ParsedGeoJSONStgGraph {
@@ -32,7 +32,7 @@ struct StgEdge {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EdgeTemporals {
     width: f32, // Assumed to be diameter, not radius
-    // other_properties: serde_json::Value,
+                // other_properties: serde_json::Value,
 }
 
 #[derive(Debug, Default)]

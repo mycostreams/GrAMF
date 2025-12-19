@@ -1,5 +1,5 @@
-use rusqlite::Connection;
 use crate::graph_model::types::TimeSeries;
+use rusqlite::Connection;
 
 pub fn insert_timeseries<T: serde::Serialize>(
     conn: &Connection,
@@ -21,9 +21,7 @@ pub fn load_timeseries<T: for<'a> serde::Deserialize<'a>>(
     conn: &Connection,
     edge_id: u64,
 ) -> anyhow::Result<Option<TimeSeries<T>>> {
-    let mut stmt = conn.prepare(
-        "SELECT data FROM edge_timeseries WHERE edge_id = ?"
-    )?;
+    let mut stmt = conn.prepare("SELECT data FROM edge_timeseries WHERE edge_id = ?")?;
 
     let mut rows = stmt.query([edge_id])?;
 
