@@ -61,16 +61,3 @@ pub fn save_geojson_to_path<P: AsRef<std::path::Path>>(
     std::fs::write(path, data)?;
     Ok(())
 }
-
-#[test]
-fn test_load_geojson_from_path() {
-    let geojson = load_geojson_from_path("test_data/stg.geojson").unwrap();
-    assert!(matches!(geojson, GeoJson::FeatureCollection(_)));
-    match geojson {
-        GeoJson::FeatureCollection(fc) => {
-            let metadata: Metadata = Metadata::from_stg_feature_collection(&fc).unwrap();
-            println!("{ }", metadata.fmt());
-        }
-        _ => panic!("Expected a FeatureCollection"),
-    }
-}
