@@ -15,7 +15,7 @@ impl EdgeData {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Component)]
+#[derive(Debug, Clone, Serialize, Deserialize, Component, Default)]
 pub struct EdgeProperties {
     pub diameter: Option<f64>,
     #[serde(flatten)]

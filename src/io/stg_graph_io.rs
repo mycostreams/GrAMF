@@ -2,11 +2,10 @@ use bevy::math::Vec2;
 
 use crate::graphs::types::TimeSeries;
 
-
 #[derive(Debug, Default)]
 pub struct ParsedGeoJSONStgGraph {
     metadata: Metadata,
-    graph: ParsedGraph
+    graph: ParsedGraph,
 }
 
 #[derive(Debug, Default)]
@@ -18,7 +17,7 @@ pub struct ParsedGraph {
 #[derive(Debug, Default)]
 struct Node {
     id: i64,
-    position: Vec2
+    position: Vec2,
 }
 
 #[derive(Debug, Default)]
@@ -77,11 +76,9 @@ impl Metadata {
     }
 
     pub fn fmt(&self) -> String {
-
         // Formatter with line breaks
         format!(
             "Metadata \n\ttimestamps: \n{:?}, \n\tspores: \n{:?}, \n\ttimestamp_spores: \n{:?} \n}}",
-
             self.timestamps, self.spores, self.timestamp_spores
         )
     }
