@@ -1,25 +1,25 @@
 use bevy::math::Vec2;
 
 use crate::graphs::types::TimeSeries;
-
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct ParsedGeoJSONStgGraph {
     metadata: Metadata,
     graph: ParsedGraph,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct ParsedGraph {
     nodes: Vec<Node>,
     edges: Vec<StgEdge>,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct Node {
     id: i64,
     position: Vec2,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct StgEdge {
     source: i64,
@@ -28,7 +28,7 @@ struct StgEdge {
     hyperedge: Option<i64>,
     time_series: TimeSeries<EdgeTemporals>,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct EdgeTemporals {
     width: f32, // Assumed to be diameter, not radius
@@ -42,12 +42,14 @@ pub struct Metadata {
     timestamp_spores: Vec<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct Spore {
     id: String,
     properties: SporeProperties,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct SporeProperties {
     activation: usize,
