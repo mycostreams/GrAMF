@@ -138,7 +138,7 @@ impl SpatioTemporalGraph {
 
         for (idx, node) in nodes.iter().enumerate() {
             let node_idx = stg.graph.add_node(*node);
-            stg.nodes_map.insert(idx.try_into().unwrap(), node_idx);
+            stg.nodes_map.insert(idx, node_idx);
         }
 
         stg.graph.add_edge(
