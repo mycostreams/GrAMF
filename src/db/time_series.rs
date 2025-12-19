@@ -17,7 +17,7 @@ pub fn insert_timeseries<T: serde::Serialize>(
     Ok(())
 }
 
-pub fn load_timeseries<T: for<'a> serde::Deserialize<'a>>(
+pub fn load_timeseries<T: serde::de::DeserializeOwned>(
     conn: &Connection,
     edge_id: u64,
 ) -> anyhow::Result<Option<TimeSeries<T>>> {
