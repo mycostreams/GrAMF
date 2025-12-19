@@ -1,15 +1,13 @@
 use crate::{
     graphs::{
-        edges::{Edge, EdgeData, EdgeProperties},
+        edges::{Edge, EdgeData},
         nodes::NodeData,
-        types::TimeSeries,
     },
     io::stg_graph_io::Metadata,
 };
 use bevy::prelude::Resource;
 use petgraph::graph::{NodeIndex, UnGraph};
-use serde_json::Value;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 /// ## Spatio-Temporal Graph (STG)
 /// A spatio-temporal graph structure that holds nodes and edges with temporal properties.
@@ -42,130 +40,6 @@ impl SpatioTemporalGraph {
             timestamps: Vec::new(),
             metadata: Metadata::default(),
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn load_from_geojson(geojson_str: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let value: Value = serde_json::from_str(geojson_str)?;
-        let mut stg = SpatioTemporalGraph::new();
-
-        if let Some(features) = value.get("features").and_then(|f| f.as_array()) {
-            let mut timestamp_set = BTreeSet::new();
-            let mut node_features = Vec::new();
-            let mut edge_features = Vec::new();
-
-            for feature in features {
-                if let Some(geom_type) = feature
-                    .get("geometry")
-                    .and_then(|g| g.get("type"))
-                    .and_then(|t| t.as_str())
-                {
-                    if geom_type == "Point" {
-                        node_features.push(feature.clone());
-                    } else if geom_type == "LineString" {
-                        edge_features.push(feature.clone());
-                        if let Some(props) = feature.get("properties").and_then(|p| p.as_object()) {
-                            for key in props.keys() {
-                                if let Ok(ts) = key.parse::<i64>() {
-                                    timestamp_set.insert(ts);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stg.timestamps = timestamp_set.into_iter().collect();
-
-            stg.load_nodes(node_features)?;
-            stg.load_edges(edge_features)?;
-        }
-
-        Ok(stg)
-    }
-
-    fn load_nodes(&mut self, node_features: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
-        for feature in node_features {
-            if let (Some(id_val), Some(coords)) = (
-                feature
-                    .get("properties")
-                    .and_then(|p| p.get("id"))
-                    .and_then(|i| i.as_str()),
-                feature
-                    .get("geometry")
-                    .and_then(|g| g.get("coordinates"))
-                    .and_then(|c| c.as_array()),
-            ) {
-                if coords.len() >= 2 {
-                    let lon = coords[0].as_f64().unwrap_or(0.0);
-                    let lat = coords[1].as_f64().unwrap_or(0.0);
-
-                    let node_data = NodeData {
-                        pos: (lon as f32, lat as f32, 0.0).into(),
-                        id: self.graph.node_count(),
-                    };
-
-                    let node_idx = self.graph.add_node(node_data);
-                    self.nodes_map.insert(id_val.to_string(), node_idx);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn load_edges(&mut self, edge_features: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
-        for feature in edge_features {
-            if let (Some(props), _coords) = (
-                feature
-                    .get("properties")
-                    .and_then(|p: &Value| p.as_object()),
-                feature
-                    .get("geometry")
-                    .and_then(|g| g.get("coordinates"))
-                    .and_then(|c| c.as_array()),
-            ) {
-                let source = props
-                    .get("source")
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string());
-                let target = props
-                    .get("target")
-                    .and_then(|t| t.as_str())
-                    .map(|t| t.to_string());
-
-                if let (Some(src), Some(tgt)) = (source, target) {
-                    let mut time_props: TimeSeries<EdgeProperties> =
-                        TimeSeries::from_len(self.timestamps.len());
-
-                    for (key, value) in props {
-                        if key.parse::<i64>().is_ok() {
-                            let diameter = value.get("diameter").and_then(|d| d.as_f64());
-                            let other = if let Value::Object(map) = value {
-                                map.clone()
-                            } else {
-                                serde_json::Map::new()
-                            };
-
-                            time_props.push(EdgeProperties {
-                                diameter,
-                                other: other.into_iter().collect(),
-                            });
-                        }
-                    }
-
-                    let edge = Edge {
-                        source: src,
-                        target: tgt,
-                        properties: time_props,
-                    };
-
-                    self.edges.push(edge);
-                }
-            }
-        }
-
-        Ok(())
     }
 
     pub fn snapshot_at(&self, timestamp: i64) -> Result<SnapshotGraph, Box<dyn std::error::Error>> {

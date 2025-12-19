@@ -2,8 +2,8 @@ use bevy::{
     color::Color,
     ecs::{name::Name, system::Commands},
     picking::{
-        events::{Out, Over, Pointer, Press, Release},
         Pickable,
+        events::{Out, Over, Pointer, Press, Release},
     },
 };
 

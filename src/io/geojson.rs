@@ -10,7 +10,6 @@ enum GraphTypes {
     PlateImage,
 }
 
-
 pub fn load_geojson_from_path<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Result<GeoJson, Box<dyn std::error::Error>> {
