@@ -4,7 +4,7 @@ use crate::graphs::types::TimeSeries;
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct ParsedGeoJSONStgGraph {
-    metadata: Metadata,
+    metadata: ParsedMetadata,
     graph: ParsedGraph,
 }
 #[allow(dead_code)]
@@ -36,7 +36,7 @@ struct EdgeTemporals {
 }
 
 #[derive(Debug, Default)]
-pub struct Metadata {
+pub struct ParsedMetadata {
     timestamps: Vec<i64>,
     spores: Vec<Spore>,
     timestamp_spores: Vec<i64>,
@@ -57,10 +57,10 @@ struct SporeProperties {
     radius_time_series: TimeSeries<f64>,
 }
 
-impl Metadata {
+impl ParsedMetadata {
     pub fn from_stg_feature_collection(
         fc: &geojson::FeatureCollection,
-    ) -> Result<Metadata, Box<dyn std::error::Error>> {
+    ) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
         let metadata = fc
             .foreign_members
             .as_ref()
@@ -86,7 +86,7 @@ impl Metadata {
     }
 }
 
-fn parse_metadata(metadata: &serde_json::Value) -> Result<Metadata, Box<dyn std::error::Error>> {
+fn parse_metadata(metadata: &serde_json::Value) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
     let timestamps = metadata
         .get("timestamps")
         .and_then(|ts| ts.as_array())
@@ -107,7 +107,7 @@ fn parse_metadata(metadata: &serde_json::Value) -> Result<Metadata, Box<dyn std:
         .map(|t| t.as_i64().ok_or("Invalid timestamp_spore"))
         .collect::<Result<Vec<i64>, _>>()?;
 
-    Ok(Metadata {
+    Ok(ParsedMetadata {
         timestamps,
         spores,
         timestamp_spores,

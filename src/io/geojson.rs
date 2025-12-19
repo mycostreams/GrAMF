@@ -1,6 +1,6 @@
 use geojson::GeoJson;
 
-use crate::io::stg_graph_io::Metadata;
+use crate::io::stg_graph_io::ParsedMetadata;
 
 /// Enum representing different graph types that might be given to the program
 /// Stg's are SpatioTemporal Graphs, containing time series data in edges.
@@ -18,7 +18,7 @@ pub fn load_geojson_from_path<P: AsRef<std::path::Path>>(
     Ok(geojson)
 }
 
-pub fn parse_geojson_to_graphs(geojson: &GeoJson) -> Result<Metadata, Box<dyn std::error::Error>> {
+pub fn parse_geojson_to_graphs(geojson: &GeoJson) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
     match geojson {
         GeoJson::FeatureCollection(fc) => parse_feature_collection(fc),
         _ => Err("Expected a FeatureCollection".into()),
@@ -46,9 +46,9 @@ fn determine_graph_type(
 
 pub fn parse_feature_collection(
     fc: &geojson::FeatureCollection,
-) -> Result<Metadata, Box<dyn std::error::Error>> {
+) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
     match determine_graph_type(fc)? {
-        GraphTypes::Stg => Metadata::from_stg_feature_collection(fc),
+        GraphTypes::Stg => ParsedMetadata::from_stg_feature_collection(fc),
         GraphTypes::PlateImage => Err("PlateImage parsing not implemented".into()),
     }
 }
