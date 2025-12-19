@@ -17,6 +17,7 @@ pub mod gramf_ui;
 pub mod graph_model;
 
 pub mod io;
+pub mod db;
 
 fn main() {
     App::new()
