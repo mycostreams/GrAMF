@@ -1,4 +1,40 @@
+use bevy::math::Vec2;
+
 use crate::graphs::types::TimeSeries;
+
+
+#[derive(Debug, Default)]
+pub struct ParsedGeoJSONStgGraph {
+    metadata: Metadata,
+    graph: ParsedGraph
+}
+
+#[derive(Debug, Default)]
+pub struct ParsedGraph {
+    nodes: Vec<Node>,
+    edges: Vec<StgEdge>,
+}
+
+#[derive(Debug, Default)]
+struct Node {
+    id: i64,
+    position: Vec2
+}
+
+#[derive(Debug, Default)]
+struct StgEdge {
+    source: i64,
+    target: i64,
+    length: f32,
+    hyperedge: Option<i64>,
+    time_series: TimeSeries<EdgeTemporals>,
+}
+
+#[derive(Debug, Default)]
+struct EdgeTemporals {
+    width: f32, // Assumed to be diameter, not radius
+    other_properties: serde_json::Value,
+}
 
 #[derive(Debug, Default)]
 pub struct Metadata {
@@ -20,23 +56,35 @@ struct SporeProperties {
     radius_time_series: TimeSeries<f64>,
 }
 
-pub(super) fn parse_stg_feature_collection(
-    fc: &geojson::FeatureCollection,
-) -> Result<Metadata, Box<dyn std::error::Error>> {
-    let metadata = fc
-        .foreign_members
-        .as_ref()
-        .and_then(|fm| fm.get("metadata"))
-        .ok_or("Missing metadata")?;
+impl Metadata {
+    pub fn from_stg_feature_collection(
+        fc: &geojson::FeatureCollection,
+    ) -> Result<Metadata, Box<dyn std::error::Error>> {
+        let metadata = fc
+            .foreign_members
+            .as_ref()
+            .and_then(|fm| fm.get("metadata"))
+            .ok_or("Missing metadata")?;
 
-    let metadata = parse_metadata(metadata)?;
+        let metadata = parse_metadata(metadata)?;
 
-    // Placeholder for actual STG graph parsing logic
-    println!(
-        "Parsing STG FeatureCollection with {} features",
-        fc.features.len()
-    );
-    Ok(metadata)
+        // Placeholder for actual STG graph parsing logic
+        println!(
+            "Parsing STG FeatureCollection with {} features",
+            fc.features.len()
+        );
+        Ok(metadata)
+    }
+
+    pub fn fmt(&self) -> String {
+
+        // Formatter with line breaks
+        format!(
+            "Metadata \n\ttimestamps: \n{:?}, \n\tspores: \n{:?}, \n\ttimestamp_spores: \n{:?} \n}}",
+
+            self.timestamps, self.spores, self.timestamp_spores
+        )
+    }
 }
 
 fn parse_metadata(metadata: &serde_json::Value) -> Result<Metadata, Box<dyn std::error::Error>> {

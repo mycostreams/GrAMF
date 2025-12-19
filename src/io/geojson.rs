@@ -1,11 +1,15 @@
 use geojson::GeoJson;
 
-use crate::io::stg_graph_io::{parse_stg_feature_collection, Metadata};
+use crate::io::stg_graph_io::Metadata;
 
+/// Enum representing different graph types that might be given to the program
+/// Stg's are SpatioTemporal Graphs, containing time series data in edges.
+/// PlateImages are graphs representing plate images at specific timestamps.
 enum GraphTypes {
     Stg,
     PlateImage,
 }
+
 
 pub fn load_geojson_from_path<P: AsRef<std::path::Path>>(
     path: P,
@@ -45,7 +49,7 @@ pub fn parse_feature_collection(
     fc: &geojson::FeatureCollection,
 ) -> Result<Metadata, Box<dyn std::error::Error>> {
     match determine_graph_type(fc)? {
-        GraphTypes::Stg => parse_stg_feature_collection(fc),
+        GraphTypes::Stg => Metadata::from_stg_feature_collection(fc),
         GraphTypes::PlateImage => Err("PlateImage parsing not implemented".into()),
     }
 }
@@ -61,12 +65,12 @@ pub fn save_geojson_to_path<P: AsRef<std::path::Path>>(
 
 #[test]
 fn test_load_geojson_from_path() {
-    let geojson = load_geojson_from_path("test_data\\stg.geojson").unwrap();
+    let geojson = load_geojson_from_path("test_data/stg.geojson").unwrap();
     assert!(matches!(geojson, GeoJson::FeatureCollection(_)));
     match geojson {
         GeoJson::FeatureCollection(fc) => {
-            let metadata = parse_stg_feature_collection(&fc).unwrap();
-            print!("{:?}", metadata);
+            let metadata: Metadata = Metadata::from_stg_feature_collection(&fc).unwrap();
+            println!("{ }", metadata.fmt());
         }
         _ => panic!("Expected a FeatureCollection"),
     }
