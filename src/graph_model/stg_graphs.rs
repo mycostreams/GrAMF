@@ -8,6 +8,7 @@ pub struct Metadata {
 }
 
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct Spore {
     id: String,
     position: Vec3,
