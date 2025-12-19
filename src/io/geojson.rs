@@ -18,7 +18,9 @@ pub fn load_geojson_from_path<P: AsRef<std::path::Path>>(
     Ok(geojson)
 }
 
-pub fn parse_geojson_to_graphs(geojson: &GeoJson) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
+pub fn parse_geojson_to_graphs(
+    geojson: &GeoJson,
+) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
     match geojson {
         GeoJson::FeatureCollection(fc) => parse_feature_collection(fc),
         _ => Err("Expected a FeatureCollection".into()),

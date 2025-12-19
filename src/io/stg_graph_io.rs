@@ -86,7 +86,9 @@ impl ParsedMetadata {
     }
 }
 
-fn parse_metadata(metadata: &serde_json::Value) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
+fn parse_metadata(
+    metadata: &serde_json::Value,
+) -> Result<ParsedMetadata, Box<dyn std::error::Error>> {
     let timestamps = metadata
         .get("timestamps")
         .and_then(|ts| ts.as_array())

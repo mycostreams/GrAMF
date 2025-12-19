@@ -8,12 +8,6 @@ pub struct NodeData {
     pub id: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Node {
-    pub id: String,
-    pub coordinates: (f64, f64),
-}
-
 impl From<NodeData> for NodeIndex {
     fn from(value: NodeData) -> Self {
         NodeIndex::new(value.id)
