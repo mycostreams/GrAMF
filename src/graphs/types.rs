@@ -1,7 +1,8 @@
+use rkyv::{Archive, Deserialize, Serialize};
 // Time series type. Measures seconds since UNIX epoch.
 
 /// A time-series type for storing a consecutive set of temporal data.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Archive, Serialize, Deserialize)]
 pub struct TimeSeries<T> {
     pub timestamps: Vec<T>,
 }

@@ -1,38 +1,29 @@
-use bevy::{ecs::component::Component, math::Vec3};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use bevy::math::Vec3;
 
-use crate::graphs::types::TimeSeries;
+/// ## Edge Data
+/// Represents the data associated with an edge in the spatio-temporal graph.
 
 #[derive(Debug, Clone, Copy)]
 pub struct EdgeData {
     pub node_poss: (Vec3, Vec3),
+    pub source: usize,
+    pub target: usize,
+    pub id: usize,
 }
 
 impl EdgeData {
     pub fn length(&self) -> f32 {
-        (self.node_poss.1 - self.node_poss.0).length()
+        self.node_poss.0.distance(self.node_poss.1)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Component, Default)]
-pub struct EdgeProperties {
-    pub diameter: Option<f64>,
-    #[serde(flatten)]
-    pub other: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Edge {
-    pub source: String,
-    pub target: String,
-    pub properties: TimeSeries<EdgeProperties>,
 }
 
 #[test]
 fn test_edge_data_length() {
     let edge = EdgeData {
         node_poss: (Vec3::ZERO, Vec3::new(3.0, 4.0, 0.0)),
+        source: 1,
+        target: 2,
+        id: 0,
     };
     assert_eq!(edge.length(), 5.0);
 }

@@ -1,13 +1,17 @@
-use crate::{
-    graphs::{
-        edges::{Edge, EdgeData},
-        nodes::NodeData,
-    },
-    io::stg_graph_io::Metadata,
-};
-use bevy::prelude::Resource;
+use crate::graphs::{edges::EdgeData, nodes::NodeData};
+use bevy::{math::Vec3, prelude::Resource};
 use petgraph::graph::{NodeIndex, UnGraph};
-use std::collections::HashMap;
+
+#[derive(Debug, Default)]
+pub struct Metadata {
+    timestamps: Vec<i64>,
+}
+
+#[derive(Debug, Default)]
+pub struct Spore {
+    id: String,
+    position: Vec3,
+}
 
 /// ## Spatio-Temporal Graph (STG)
 /// A spatio-temporal graph structure that holds nodes and edges with temporal properties.
@@ -17,9 +21,8 @@ use std::collections::HashMap;
 #[derive(Debug, Default)]
 pub struct SpatioTemporalGraph {
     pub graph: UnGraph<NodeData, EdgeData>,
-    pub nodes_map: HashMap<String, NodeIndex>,
-    pub edges: Vec<Edge>,
-    pub timestamps: Vec<i64>,
+    pub nodes_map: std::collections::HashMap<usize, NodeIndex>,
+    pub spores: Vec<Spore>,
     pub metadata: Metadata,
 }
 
@@ -35,10 +38,9 @@ impl SpatioTemporalGraph {
     pub fn new() -> Self {
         SpatioTemporalGraph {
             graph: UnGraph::new_undirected(),
-            nodes_map: HashMap::new(),
-            edges: Vec::new(),
-            timestamps: Vec::new(),
+            spores: Vec::new(),
             metadata: Metadata::default(),
+            nodes_map: std::collections::HashMap::new(),
         }
     }
 
@@ -51,14 +53,14 @@ impl SpatioTemporalGraph {
             snapshot_graph.add_node(*node);
         }
 
-        for edge in &self.edges {
+        for edge in self.graph.edge_weights().collect::<Vec<&EdgeData>>() {
             // Check if both source and target nodes exist in the graph
             if let (Some(&src_idx), Some(&tgt_idx)) = (
                 self.nodes_map.get(&edge.source),
                 self.nodes_map.get(&edge.target),
             ) {
                 // Check if the graph has properties for the given timestamp
-                if self.timestamps.contains(&timestamp) {
+                if self.metadata.timestamps.contains(&timestamp) {
                     // Add the edge to the snapshot graph
                     if let (Some(src_node), Some(tgt_node)) = (
                         self.graph.node_weight(src_idx),
@@ -69,6 +71,9 @@ impl SpatioTemporalGraph {
                             NodeIndex::new(tgt_idx.index()),
                             EdgeData {
                                 node_poss: (src_node.pos, tgt_node.pos),
+                                source: edge.source,
+                                target: edge.target,
+                                id: edge.id,
                             },
                         );
                     }
@@ -133,7 +138,7 @@ impl SpatioTemporalGraph {
 
         for (idx, node) in nodes.iter().enumerate() {
             let node_idx = stg.graph.add_node(*node);
-            stg.nodes_map.insert(idx.to_string(), node_idx);
+            stg.nodes_map.insert(idx.try_into().unwrap(), node_idx);
         }
 
         stg.graph.add_edge(
@@ -141,10 +146,11 @@ impl SpatioTemporalGraph {
             NodeIndex::new(1),
             EdgeData {
                 node_poss: (nodes[0].pos, nodes[1].pos),
+                source: 0,
+                target: 1,
+                id: 0,
             },
         );
-
-        stg.timestamps = vec![1000000000000000000i64];
 
         stg
     }
@@ -185,6 +191,9 @@ impl SnapshotGraph {
             NodeIndex::new(1),
             EdgeData {
                 node_poss: (nodes[0].pos, nodes[1].pos),
+                source: 0,
+                target: 1,
+                id: 0,
             },
         );
 
