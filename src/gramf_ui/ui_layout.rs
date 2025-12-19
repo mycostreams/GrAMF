@@ -5,7 +5,7 @@ use bevy::{
     prelude::Result,
 };
 use bevy::{reflect::Reflect, sprite::Sprite};
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{EguiContexts, egui};
 
 use crate::bevy_utils::camera_controls::ResetCameraEvent;
 
