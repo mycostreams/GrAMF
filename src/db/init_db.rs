@@ -1,7 +1,6 @@
 use rusqlite::Connection;
 use std::path::Path;
 
-
 pub fn open_default_path_db() -> rusqlite::Result<Connection> {
     let data_dir = dirs_next::data_dir().unwrap().join("grAMF");
     std::fs::create_dir_all(&data_dir).unwrap();
