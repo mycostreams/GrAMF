@@ -28,7 +28,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ github.ref || github.run_id }}
-      - uses: dtolnay/rust-toolchain@stable
+          
       - name: Install alsa and udev
         if: runner.os == 'Linux'
         run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev
