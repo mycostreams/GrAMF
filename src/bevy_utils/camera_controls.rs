@@ -11,7 +11,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-use crate::bevy_utils::graph_entities::UiEdge;
+use crate::bevy_utils::resource_config::EDGE_WIDTH_SCALE_VISIBLE;
 
 #[derive(Message)]
 pub struct ResetCameraEvent;
@@ -135,13 +135,25 @@ pub(crate) fn reset_camera(
 /// Update the scale of edges based on the camera's zoom level to maintain consistent visual thickness.
 pub(crate) fn update_edge_scale(
     camera_query: Single<&Projection>,
-    mut edge_query: Query<(&mut Transform, &UiEdge)>,
+    mut edge_query: Query<&mut Transform, With<crate::bevy_utils::graph_entities::EdgeTag>>,
 ) {
     let Projection::Orthographic(proj) = &*camera_query else {
         return;
     };
 
-    for (mut transform, edge) in &mut edge_query {
-        transform.scale.y = edge.base_width * proj.scale;
+    for mut transform in &mut edge_query {
+        transform.scale.y = EDGE_WIDTH_SCALE_VISIBLE * proj.scale;
     }
+}
+
+#[test]
+fn test_get_origin_shift() {
+    let origin = Vec2::new(400.0, 300.0);
+    let mouse_pos = Vec2::new(450.0, 350.0);
+    let zoom = 1.1; // Zooming in by 10%
+    let shift = get_origin_shift(origin, mouse_pos, zoom);
+
+    println!("Shift: {:?}", shift);
+    assert!((shift.x + 5.0).abs() < 1e-5);
+    assert!((shift.y + 5.0).abs() < 1e-5);
 }

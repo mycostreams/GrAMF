@@ -9,17 +9,23 @@ use bevy::{
 
 use crate::bevy_utils::resource_config::EDGE_WIDTH_SCALE_VISIBLE;
 
+#[derive(Component)]
+pub(crate) struct NodeTag;
+#[derive(Component)]
+pub(crate) struct EdgeTag;
+
 #[derive(Bundle)]
 pub struct EntityNode {
     model: Sprite,
     transform: Transform,
+    graph_type: NodeTag,
 }
 
 #[derive(Bundle)]
 pub struct EntityEdge {
     model: Sprite,
     transform: Transform,
-    data: UiEdge,
+    graph_type: EdgeTag,
 }
 
 impl EntityNode {
@@ -31,6 +37,7 @@ impl EntityNode {
                 ..Default::default()
             },
             transform: Transform::from_translation(pos),
+            graph_type: NodeTag,
         }
     }
 }
@@ -45,7 +52,7 @@ impl EntityEdge {
             },
             transform: Transform::from_translation(pos)
                 .with_rotation(bevy::math::Quat::from_rotation_z(angle)),
-            data: UiEdge::new(EDGE_WIDTH_SCALE_VISIBLE),
+            graph_type: EdgeTag,
         }
     }
     pub(crate) fn from_edge_data(edge_data: &crate::graph_model::edges::EdgeData) -> Self {
@@ -55,16 +62,5 @@ impl EntityEdge {
         let angle = direction.y.atan2(direction.x);
 
         EntityEdge::new(midpoint, distance, angle)
-    }
-}
-
-#[derive(Component)]
-pub struct UiEdge {
-    pub base_width: f32,
-}
-
-impl UiEdge {
-    pub fn new(base_width: f32) -> Self {
-        UiEdge { base_width }
     }
 }

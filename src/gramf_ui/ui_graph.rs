@@ -15,16 +15,16 @@ use crate::{
 
 /// Spawn the entire graph: nodes and edges.
 pub(crate) fn spawn_graph(stg_graph: &SnapshotGraph, commands: &mut Commands) {
-    for node in stg_graph.graph.raw_nodes() {
-        spawn_node(node.weight, commands);
+    for node in stg_graph.graph.node_weights() {
+        spawn_node(node, commands);
     }
-    for edge in stg_graph.graph.raw_edges() {
-        spawn_edge(edge.weight, commands);
+    for edge in stg_graph.graph.edge_weights() {
+        spawn_edge(edge, commands);
     }
 }
 
 /// Spawn a node at its position with pickable and recoloring behavior.
-fn spawn_node(node: NodeData, commands: &mut Commands) {
+fn spawn_node(node: &NodeData, commands: &mut Commands) {
     commands
         .spawn((
             Name::new("Node"),
@@ -40,11 +40,11 @@ fn spawn_node(node: NodeData, commands: &mut Commands) {
 }
 
 /// Spawn an edge between two positions as a rectangle mesh.
-fn spawn_edge(edge_data: EdgeData, commands: &mut Commands) {
+fn spawn_edge(edge_data: &EdgeData, commands: &mut Commands) {
     commands
         .spawn((
             Name::new("Edge"),
-            EntityEdge::from_edge_data(&edge_data),
+            EntityEdge::from_edge_data(edge_data),
             Pickable::default(),
         ))
         .observe(recolor_sprite::<Pointer<Over>>(Color::srgb(1.0, 0.0, 1.0)))
