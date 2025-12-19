@@ -1,6 +1,7 @@
 use crate::graph_model::types::TimeSeries;
 use rusqlite::Connection;
 
+/// Inserts a time series into the database for a given edge ID.
 pub fn insert_timeseries<T: serde::Serialize>(
     conn: &Connection,
     edge_id: u64,
@@ -17,6 +18,7 @@ pub fn insert_timeseries<T: serde::Serialize>(
     Ok(())
 }
 
+/// Loads a time series from the database for a given edge ID.
 pub fn load_timeseries<T: serde::de::DeserializeOwned>(
     conn: &Connection,
     edge_id: u64,

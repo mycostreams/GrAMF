@@ -1,11 +1,9 @@
 use std::num::NonZero;
 
-use rusqlite::params;
-use crate::db::{open_default_path_db, schema::init_schema};
 use lru::LruCache;
 use rusqlite::Connection;
 
-use crate::{db::time_series::{insert_timeseries, load_timeseries}, graph_model::types::TimeSeries};
+use crate::{db::time_series::load_timeseries, graph_model::types::TimeSeries};
 
 /// A store for time series data associated with edges in a graph.
 /// It uses an LRU cache to minimize database reads.
@@ -13,7 +11,6 @@ pub struct TimeSeriesStore<T> {
     conn: Connection,
     cache: LruCache<u64, TimeSeries<T>>,
 }
-
 
 /// Implementations for TimeSeriesStore
 impl<T> TimeSeriesStore<T>
@@ -30,22 +27,31 @@ where
 
     /// Retrieves the time series data for the given edge ID.
     pub fn get(&mut self, edge_id: u64) -> anyhow::Result<Option<&TimeSeries<T>>> {
+        // Check if the time series is in the cache
         if self.cache.contains(&edge_id) {
             return Ok(self.cache.get(&edge_id));
         }
 
+        // Load the time series from the database
         let ts = load_timeseries(&self.conn, edge_id)?;
+
+        // Insert into cache if found
         if let Some(ts) = ts {
             self.cache.put(edge_id, ts);
         }
 
+        // Return the time series from the cache
         Ok(self.cache.get(&edge_id))
     }
 }
 
-
 #[test]
 fn test_time_series_store() {
+    use crate::{
+        db::{init_db::open_default_path_db, schema::init_schema, time_series::insert_timeseries},
+        graph_model::types::TimeSeries,
+    };
+
     // Setup in-memory database
     let conn = open_default_path_db().unwrap();
     init_schema(&conn).unwrap();
@@ -66,6 +72,15 @@ fn test_time_series_store() {
 
 #[test]
 fn test_time_series_load_directly() {
+    use crate::{
+        db::{
+            init_db::open_default_path_db,
+            schema::init_schema,
+            time_series::{insert_timeseries, load_timeseries},
+        },
+        graph_model::types::TimeSeries,
+    };
+
     // Setup in-memory database
     let conn = open_default_path_db().unwrap();
     init_schema(&conn).unwrap();
