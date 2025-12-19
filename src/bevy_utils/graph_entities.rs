@@ -48,7 +48,7 @@ impl EntityEdge {
             data: UiEdge::new(EDGE_WIDTH_SCALE_VISIBLE),
         }
     }
-    pub(crate) fn from_edge_data(edge_data: &crate::graphs::edges::EdgeData) -> Self {
+    pub(crate) fn from_edge_data(edge_data: &crate::graph_model::edges::EdgeData) -> Self {
         let midpoint = (edge_data.node_poss.0 + edge_data.node_poss.1) / 2.0;
         let direction = (edge_data.node_poss.1 - edge_data.node_poss.0).normalize();
         let distance = edge_data.node_poss.0.distance(edge_data.node_poss.1);

@@ -1,7 +1,7 @@
 use crate::{
     bevy_utils::camera_controls::camera_controls_plugin,
     gramf_ui::{ui_graph::spawn_graph, ui_layout::ui_system},
-    graphs::stg_graphs::SnapshotGraph,
+    graph_model::stg_graphs::SnapshotGraph,
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -14,7 +14,7 @@ pub mod bevy_utils;
 pub mod gramf_ui;
 
 /// Graphs module containing various graph implementations and related structures.
-pub mod graphs;
+pub mod graph_model;
 
 pub mod io;
 

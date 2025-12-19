@@ -1,6 +1,6 @@
 use bevy::math::Vec2;
 
-use crate::graphs::types::TimeSeries;
+use crate::graph_model::types::TimeSeries;
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct ParsedGeoJSONStgGraph {

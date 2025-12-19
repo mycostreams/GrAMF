@@ -1,4 +1,4 @@
-use crate::graphs::{edges::EdgeData, nodes::NodeData};
+use crate::graph_model::{edges::EdgeData, nodes::NodeData};
 use bevy::{math::Vec3, prelude::Resource};
 use petgraph::graph::{NodeIndex, UnGraph};
 
