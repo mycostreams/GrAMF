@@ -10,7 +10,7 @@ use bevy::{
 use crate::{
     bevy_utils::graph_entities::{EntityEdge, EntityNode},
     gramf_ui::ui_layout::recolor_sprite,
-    graph_model::{edges::EdgeData, nodes::NodeData, stg_graphs::SnapshotGraph},
+    graph_model::{edges::EdgeLight, nodes::NodeData, stg_graphs::SnapshotGraph},
 };
 
 /// Spawn the entire graph: nodes and edges.
@@ -40,7 +40,7 @@ fn spawn_node(node: &NodeData, commands: &mut Commands) {
 }
 
 /// Spawn an edge between two positions as a rectangle mesh.
-fn spawn_edge(edge_data: &EdgeData, commands: &mut Commands) {
+fn spawn_edge(edge_data: &EdgeLight, commands: &mut Commands) {
     commands
         .spawn((
             Name::new("Edge"),
