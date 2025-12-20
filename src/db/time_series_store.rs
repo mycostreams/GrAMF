@@ -9,7 +9,7 @@ use crate::{db::time_series::load_timeseries, graph_model::types::TimeSeries};
 /// It uses an LRU cache to minimize database reads.
 pub struct TimeSeriesStore<T> {
     conn: Connection,
-    cache: LruCache<u64, TimeSeries<T>>,
+    cache: LruCache<isize, TimeSeries<T>>,
 }
 
 /// Implementations for TimeSeriesStore
@@ -26,7 +26,7 @@ where
     }
 
     /// Retrieves the time series data for the given edge ID.
-    pub fn get(&mut self, edge_id: u64) -> anyhow::Result<Option<&TimeSeries<T>>> {
+    pub fn get(&mut self, edge_id: isize) -> anyhow::Result<Option<&TimeSeries<T>>> {
         // Check if the time series is in the cache
         if self.cache.contains(&edge_id) {
             return Ok(self.cache.get(&edge_id));

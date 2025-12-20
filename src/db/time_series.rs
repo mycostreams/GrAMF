@@ -4,7 +4,7 @@ use rusqlite::Connection;
 /// Inserts a time series into the database for a given edge ID.
 pub fn insert_timeseries<T: serde::Serialize>(
     conn: &Connection,
-    edge_id: u64,
+    edge_id: isize,
     ts: &TimeSeries<T>,
 ) -> anyhow::Result<()> {
     let blob = postcard::to_allocvec(ts)?;
@@ -21,7 +21,7 @@ pub fn insert_timeseries<T: serde::Serialize>(
 /// Loads a time series from the database for a given edge ID.
 pub fn load_timeseries<T: serde::de::DeserializeOwned>(
     conn: &Connection,
-    edge_id: u64,
+    edge_id: isize,
 ) -> anyhow::Result<Option<TimeSeries<T>>> {
     let mut stmt = conn.prepare("SELECT data FROM edge_timeseries WHERE edge_id = ?")?;
 
