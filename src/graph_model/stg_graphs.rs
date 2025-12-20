@@ -1,4 +1,4 @@
-use crate::graph_model::{edges::EdgeData, nodes::NodeData};
+use crate::graph_model::{edges::EdgeLight, nodes::NodeData};
 use bevy::{math::Vec3, prelude::Resource};
 use petgraph::graph::{NodeIndex, UnGraph};
 
@@ -21,7 +21,7 @@ pub struct Spore {
 /// The timestamps vector holds all unique timestamps present in the graph.
 #[derive(Debug, Default)]
 pub struct SpatioTemporalGraph {
-    pub graph: UnGraph<NodeData, EdgeData>,
+    pub graph: UnGraph<NodeData, EdgeLight>,
     pub nodes_map: std::collections::HashMap<usize, NodeIndex>,
     pub spores: Vec<Spore>,
     pub metadata: Metadata,
@@ -31,7 +31,7 @@ pub struct SpatioTemporalGraph {
 /// A snapshot of the spatio-temporal graph at a specific timestamp.
 #[derive(Debug, Resource, Default, Clone)]
 pub struct SnapshotGraph {
-    pub graph: UnGraph<NodeData, EdgeData>,
+    pub graph: UnGraph<NodeData, EdgeLight>,
     pub timestamp: i64,
 }
 
@@ -54,7 +54,7 @@ impl SpatioTemporalGraph {
             snapshot_graph.add_node(*node);
         }
 
-        for edge in self.graph.edge_weights().collect::<Vec<&EdgeData>>() {
+        for edge in self.graph.edge_weights().collect::<Vec<&EdgeLight>>() {
             // Check if both source and target nodes exist in the graph
             if let (Some(&src_idx), Some(&tgt_idx)) = (
                 self.nodes_map.get(&edge.source),
@@ -70,7 +70,7 @@ impl SpatioTemporalGraph {
                         snapshot_graph.add_edge(
                             NodeIndex::new(src_idx.index()),
                             NodeIndex::new(tgt_idx.index()),
-                            EdgeData {
+                            EdgeLight {
                                 node_poss: (src_node.pos, tgt_node.pos),
                                 source: edge.source,
                                 target: edge.target,
@@ -145,7 +145,7 @@ impl SpatioTemporalGraph {
         stg.graph.add_edge(
             NodeIndex::new(0),
             NodeIndex::new(1),
-            EdgeData {
+            EdgeLight {
                 node_poss: (nodes[0].pos, nodes[1].pos),
                 source: 0,
                 target: 1,
@@ -190,7 +190,7 @@ impl SnapshotGraph {
         stg.graph.add_edge(
             NodeIndex::new(0),
             NodeIndex::new(1),
-            EdgeData {
+            EdgeLight {
                 node_poss: (nodes[0].pos, nodes[1].pos),
                 source: 0,
                 target: 1,
