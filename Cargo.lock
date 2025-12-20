@@ -2931,6 +2931,7 @@ dependencies = [
  "bevy_egui",
  "chrono",
  "colorcet",
+ "crossbeam-channel",
  "dirs-next",
  "geojson",
  "lru",
