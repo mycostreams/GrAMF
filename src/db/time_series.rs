@@ -29,7 +29,7 @@ pub fn load_timeseries<T: serde::de::DeserializeOwned>(
 
     if let Some(row) = rows.next()? {
         let blob: Vec<u8> = row.get(0)?;
-        let ts = postcard::from_bytes(&blob)?;
+        let ts: TimeSeries<T> = postcard::from_bytes(&blob)?;
         Ok(Some(ts))
     } else {
         Ok(None)
