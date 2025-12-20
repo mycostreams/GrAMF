@@ -55,7 +55,7 @@ impl EntityEdge {
             graph_type: EdgeTag,
         }
     }
-    pub(crate) fn from_edge_data(edge_data: &crate::graph_model::edges::EdgeData) -> Self {
+    pub(crate) fn from_edge_data(edge_data: &crate::graph_model::edges::EdgeLight) -> Self {
         let midpoint = (edge_data.node_poss.0 + edge_data.node_poss.1) / 2.0;
         let direction = (edge_data.node_poss.1 - edge_data.node_poss.0).normalize();
         let distance = edge_data.node_poss.0.distance(edge_data.node_poss.1);
