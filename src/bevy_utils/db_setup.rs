@@ -1,4 +1,4 @@
-use crate::bevy_utils::db_usage::DbWorker;
+
 use crate::{
     bevy_utils::db_usage::{DbRequestEvent, DbResponseEvent},
     graph_model::{
@@ -6,7 +6,6 @@ use crate::{
         types::TimeSeries,
     },
 };
-use bevy::ecs::system::Commands;
 use crossbeam_channel::Sender;
 use rusqlite::{Connection, params_from_iter};
 
@@ -16,22 +15,45 @@ pub(crate) struct DbService {
 
 use crossbeam_channel::Receiver;
 
+enum RequestHandleError {
+    Error,
+    Shutdown,
+}
+
+/// Opens (or creates) a SQLite database at the default application data path.
+fn open_default_path_db() -> String {
+    let data_dir = dirs_next::data_dir().unwrap().join("grAMF");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let binding = data_dir.join("gramf.db");
+    let data_path = binding.to_str().expect("REASON");
+    data_path.to_string()
+}
+
 pub(super) fn run_db_service(rx_req: Receiver<DbRequestEvent>, tx_res: Sender<DbResponseEvent>) {
-    let mut service = DbService::new("edges.db");
+    let mut service = DbService::new(&open_default_path_db());
     service.init_schema();
 
-    for request in rx_req {
-        match request {
-            DbRequestEvent::InsertEdges(edges) => {
-                service.insert_edges(edges, &tx_res);
-            }
-            DbRequestEvent::QueryEdges(ids) => {
-                service.query_edges(ids, &tx_res);
-            }
-            DbRequestEvent::Shutdown => {
-                let _ = tx_res.send(DbResponseEvent::ShutdownComplete);
-                break;
-            }
+    while let Ok(request) = rx_req.recv() {
+        match handle_request(request, &mut service, &tx_res) {
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
+}
+
+fn handle_request(request: DbRequestEvent, service: &mut DbService, tx_res: &Sender<DbResponseEvent>) -> Result<(), RequestHandleError> {
+    match request {
+        DbRequestEvent::InsertEdges(edges) => {
+            service.insert_edges(edges, &tx_res);
+            Ok(())
+        }
+        DbRequestEvent::QueryEdges(ids) => {
+            service.query_edges(ids, &tx_res);
+            Ok(())
+        }
+        DbRequestEvent::Shutdown => {
+            let _ = tx_res.send(DbResponseEvent::ShutdownComplete);
+            Err(RequestHandleError::Shutdown)
         }
     }
 }
@@ -118,13 +140,13 @@ impl DbService {
                 let blob: Vec<u8> = row.get(4)?;
                 let temporal_props: TimeSeries<EdgeTemporals> =
                     postcard::from_bytes(&blob).unwrap();
-                return Ok(EdgeFull {
+                Ok(EdgeFull {
                     id: row.get(0)?,
                     source: row.get(1)?,
                     target: row.get(2)?,
                     edge_cluster_id: row.get(3)?,
-                    temporal_props: temporal_props,
-                });
+                    temporal_props,
+                })
             })
             .unwrap();
 
@@ -136,4 +158,3 @@ impl DbService {
         let _ = tx_res.send(DbResponseEvent::Edges(results));
     }
 }
-
