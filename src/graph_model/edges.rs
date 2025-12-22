@@ -1,5 +1,6 @@
 use bevy::{ecs::component::Component, math::Vec3};
 use serde::{Deserialize, Serialize};
+use serde_json::Map;
 
 use crate::graph_model::types::TimeSeries;
 
@@ -43,6 +44,30 @@ pub struct EdgeTemporals {
     pub width: f32,
     pub progress: EdgeProgress,
     pub other_data: serde_json::Map<String, serde_json::Value>,
+}
+
+impl EdgeFull {
+    pub fn new() -> Self {
+        EdgeFull {
+            source: 0,
+            target: 1,
+            id: 1,
+            edge_cluster_id: 3,
+            temporal_props: TimeSeries {
+                timestamps: vec![EdgeTemporals::new()],
+            },
+        }
+    }
+}
+
+impl EdgeTemporals {
+    pub fn new() -> Self {
+        EdgeTemporals {
+            width: 0.0,
+            progress: EdgeProgress::NotStarted,
+            other_data: Map::new(),
+        }
+    }
 }
 
 #[test]
