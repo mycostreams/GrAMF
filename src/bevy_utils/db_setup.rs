@@ -1,14 +1,14 @@
 use std::io::Error;
 
 use crate::{
-    bevy_utils::db_usage::{DbRequestEvent, DbResponseEvent, DbWorker},
+    bevy_utils::db_usage::{DbRequestEvent, DbResponseEvent},
     graph_model::{
         edges::{EdgeFull, EdgeTemporals},
         types::TimeSeries,
     },
 };
 use crossbeam_channel::Sender;
-use crossbeam_channel::{Receiver, unbounded};
+use crossbeam_channel::Receiver;
 use rusqlite::{Connection, params_from_iter};
 
 /// Generally used service linked to the database.
