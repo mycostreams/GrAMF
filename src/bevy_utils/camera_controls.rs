@@ -11,32 +11,19 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-use crate::bevy_utils::resource_config::EDGE_WIDTH_SCALE_VISIBLE;
+use crate::bevy_utils::resource_config::{CAMERA_SETTINGS, EDGE_WIDTH_SCALE_VISIBLE};
 
+/// Message struct to reset the camera, used by the toolbar.
 #[derive(Message)]
 pub struct ResetCameraEvent;
 
+/// Add systems to App
 pub(crate) fn camera_controls_plugin(app: &mut App) {
     app.add_systems(Update, controls)
         .add_systems(Update, reset_camera)
         .add_message::<ResetCameraEvent>()
         .add_systems(Update, update_edge_scale);
 }
-
-#[derive(Debug)]
-struct CameraSettings {
-    translation_cont_sensitivity: f32,
-    zoom_const_sensitivity: f32,
-    zoom_scroll_line_sensitivity: f32,
-    zoom_scroll_pixel_sensitivity: f32,
-}
-
-static CAMERA_SETTINGS: CameraSettings = CameraSettings {
-    translation_cont_sensitivity: 600.0,
-    zoom_const_sensitivity: 4.0,
-    zoom_scroll_pixel_sensitivity: 1.0 + 1e-3,
-    zoom_scroll_line_sensitivity: 1.0 + 1e-1,
-};
 
 /// Update function that handles all controls in the graph viewport
 pub(crate) fn controls(
@@ -110,6 +97,7 @@ pub(crate) fn controls(
     }
 }
 
+/// Get the shift from the origin based on mouse location
 fn get_origin_shift(origin_2d: Vec2, mouse_loc: Vec2, zoom: f32) -> Vec2 {
     // Get mouse position from the center
     let mouse_pos_from_cent = mouse_loc - origin_2d;
