@@ -7,8 +7,8 @@ use crate::{
         types::TimeSeries,
     },
 };
-use crossbeam_channel::Sender;
 use crossbeam_channel::Receiver;
+use crossbeam_channel::Sender;
 use rusqlite::{Connection, params_from_iter};
 
 /// Generally used service linked to the database.
@@ -22,6 +22,7 @@ enum RequestHandleResult {
 }
 
 /// Opens (or creates) a filepath at the default application data path.
+/// Might need to be moved to IO
 fn open_default_path_db() -> String {
     let data_dir = dirs_next::data_dir().unwrap().join("grAMF");
     std::fs::create_dir_all(&data_dir).unwrap();
@@ -41,12 +42,14 @@ pub(super) fn run_db_service(rx_req: Receiver<DbRequestEvent>, tx_res: Sender<Db
         Err(schema_error) => println!("{:?}", schema_error.to_string()),
     }
 
+    // Here we continuously read messages, and process them.
     while let Ok(request) = rx_req.recv() {
         match handle_request(request, &mut service, &tx_res) {
             Ok(result_val) => match result_val {
                 RequestHandleResult::Success => continue,
                 RequestHandleResult::Shutdown => break,
             },
+            //TODO: Change later to log and restart service
             Err(_) => break,
         }
     }
@@ -129,10 +132,6 @@ impl DbService {
         }
 
         tx.commit()?;
-
-        // let _ = tx_res.send(DbResponseEvent::InsertProgress {
-        //     inserted: edges.len(),
-        // });
 
         Ok(edges.len())
     }

@@ -7,6 +7,8 @@ use crate::graph_model::edges::EdgeFull;
 use crossbeam_channel::unbounded;
 use crossbeam_channel::{Receiver, Sender};
 
+use bevy::app::AppExit;
+
 pub fn edge_db_plugin(app: &mut App) {
     app.add_message::<DbRequestEvent>()
         .add_message::<DbResponseEvent>()
@@ -63,8 +65,6 @@ fn db_event_receiver(db: Res<DbWorker>, mut writer: MessageWriter<DbResponseEven
         writer.write(ev);
     }
 }
-
-use bevy::app::AppExit;
 
 fn db_shutdown(mut exit: MessageReader<AppExit>, mut db: ResMut<DbWorker>) {
     if exit.read().next().is_some() {
