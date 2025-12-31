@@ -36,12 +36,6 @@ fn open_default_path_db() -> String {
 pub(super) fn run_db_service(rx_req: Receiver<DbRequestEvent>, tx_res: Sender<DbResponseEvent>) {
     let mut service = DbService::new(&open_default_path_db()).unwrap();
 
-    let schema_result = service.init_schema();
-    match schema_result {
-        Ok(_) => (),
-        Err(schema_error) => println!("{:?}", schema_error.to_string()),
-    }
-
     // Here we continuously read messages, and process them.
     while let Ok(request) = rx_req.recv() {
         match handle_request(request, &mut service, &tx_res) {
@@ -84,10 +78,12 @@ fn handle_request(
 impl DbService {
     fn new(path: &str) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
-        Ok(Self { conn })
+        let new_service = Self { conn };
+        new_service.init_edge_schema()?;
+        Ok(new_service)
     }
 
-    fn init_schema(&self) -> Result<(), rusqlite::Error> {
+    fn init_edge_schema(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute_batch(
             "
                 PRAGMA journal_mode = WAL;
@@ -182,8 +178,6 @@ impl DbService {
 #[test]
 fn test_database_init() {
     let mut service = DbService::new(&open_default_path_db()).unwrap();
-
-    let _ = service.init_schema().unwrap();
 
     let trial_data = vec![EdgeFull::new()];
 
