@@ -9,6 +9,8 @@ use crossbeam_channel::{Receiver, Sender};
 
 use bevy::app::AppExit;
 
+pub struct DbStartupComplete;
+
 /// Add db systems to the app. in order to add new edges you need to write a message to the system.
 pub fn edge_db_plugin(app: &mut App) {
     app.add_message::<DbRequestEvent>()
@@ -28,11 +30,18 @@ fn setup_database(mut commands: Commands) {
     // Sender goes to db service, receiver goes to worker
     let (tx_res, rx_res) = unbounded();
 
+    println!("Creating service");
     // Create separate thread to run db-related tasks
     // Service will respond to queries
     let handle = std::thread::spawn(move || {
         run_db_service(rx_req, tx_res);
     });
+
+    tx_req.send(DbRequestEvent::Startup).unwrap();
+    if let DbResponseEvent::Started = rx_res.recv().unwrap() {
+    } else {
+        panic!("Got weird message! From edge db")
+    };
 
     // Insert db worker into Bevy engine
     // Worker will make queries and send inserts
@@ -49,6 +58,7 @@ fn setup_database(mut commands: Commands) {
 /// TODO: Add function to add column to edges and fill with data (e.g. BC calculation for graph)
 #[derive(Message, Clone, Debug)]
 pub(crate) enum DbRequestEvent {
+    Startup,
     InsertEdges(Vec<EdgeFull>),
     QueryEdges(Vec<i64>),
     Shutdown,
@@ -57,6 +67,7 @@ pub(crate) enum DbRequestEvent {
 /// Responses that can be obtained from the db.
 #[derive(Message, Debug)]
 pub(crate) enum DbResponseEvent {
+    Started,
     InsertProgress { inserted: usize },
     Edges(Vec<EdgeFull>),
     ShutdownComplete,
@@ -69,7 +80,6 @@ pub(crate) struct DbWorker {
     pub(crate) rx: Receiver<DbResponseEvent>,
     pub(crate) handle: Option<JoinHandle<()>>,
 }
-
 
 /// Read from messages, and send them to the db.
 fn db_event_sender(db: Res<DbWorker>, mut reader: MessageReader<DbRequestEvent>) {
@@ -94,4 +104,33 @@ fn db_shutdown(mut exit: MessageReader<AppExit>, mut db: ResMut<DbWorker>) {
             let _ = handle.join();
         }
     }
+}
+
+/// Integration test, so also opens a folder on the computer on disc.
+/// Other tests should init db from memory
+#[test]
+fn test_db_system() {
+    let mut app = App::new();
+
+    app.add_plugins(edge_db_plugin);
+
+    app.world_mut()
+        .resource_mut::<Messages<DbRequestEvent>>()
+        .write(DbRequestEvent::InsertEdges(vec![EdgeFull::new()]));
+
+    app.update();
+
+    app.world_mut()
+        .resource_mut::<Messages<DbRequestEvent>>()
+        .write(DbRequestEvent::QueryEdges(vec![1]));
+
+    app.update();
+
+    let db_rec_messages = app.world().resource::<Messages<DbResponseEvent>>();
+
+    println!("{}", db_rec_messages.len());
+
+    let mut enemy_died_cursor = db_rec_messages.get_cursor();
+    let enemy_died = enemy_died_cursor.read(db_rec_messages).next().unwrap();
+    println!("{:?}", enemy_died);
 }

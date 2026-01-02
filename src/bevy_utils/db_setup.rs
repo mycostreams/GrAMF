@@ -1,5 +1,3 @@
-use std::io::Error;
-
 use crate::{
     bevy_utils::db_usage::{DbRequestEvent, DbResponseEvent},
     graph_model::{
@@ -34,7 +32,10 @@ fn open_default_path_db() -> String {
 /// Creation of the database, should only be called at the start of the app.
 /// Continually runs during the app, consuming request events.
 pub(super) fn run_db_service(rx_req: Receiver<DbRequestEvent>, tx_res: Sender<DbResponseEvent>) {
+    println!("Starting Service");
     let mut service = DbService::new(&open_default_path_db()).unwrap();
+
+    println!("Created db service");
 
     // Here we continuously read messages, and process them.
     while let Ok(request) = rx_req.recv() {
@@ -54,8 +55,12 @@ fn handle_request(
     request: DbRequestEvent,
     service: &mut DbService,
     tx_res: &Sender<DbResponseEvent>,
-) -> Result<RequestHandleResult, Error> {
+) -> Result<RequestHandleResult, anyhow::Error> {
     match request {
+        DbRequestEvent::Startup => {
+            tx_res.send(DbResponseEvent::Started).unwrap();
+            Ok(RequestHandleResult::Success)
+        }
         DbRequestEvent::InsertEdges(edges) => {
             let result = service.insert_edges(edges).unwrap();
             tx_res
@@ -175,17 +180,32 @@ impl DbService {
     }
 }
 
-#[test]
-fn test_database_init() {
-    let mut service = DbService::new(&open_default_path_db()).unwrap();
+#[cfg(test)]
+mod db_tests {
+    use crate::{bevy_utils::db_setup::DbService, graph_model::edges::EdgeFull};
 
-    let trial_data = vec![EdgeFull::new()];
+    impl super::DbService {
+        fn from_memory() -> Result<Self, rusqlite::Error> {
+            let conn = rusqlite::Connection::open_in_memory()?;
+            let new_service = Self { conn };
+            new_service.init_edge_schema()?;
+            Ok(new_service)
+        }
+    }
 
-    let return_size = service.insert_edges(trial_data).unwrap();
+    #[test]
+    fn test_database_init() {
+        // From memory to not interfere with integration test
+        let mut service = DbService::from_memory().unwrap();
 
-    assert!(return_size == 1);
+        let trial_data = vec![EdgeFull::new()];
 
-    let queried_edges = service.query_edges(vec![1]).unwrap();
+        let return_size = service.insert_edges(trial_data).unwrap();
 
-    println!("{:?}", queried_edges)
+        assert!(return_size == 1);
+
+        let queried_edges = service.query_edges(vec![1]).unwrap();
+
+        println!("{:?}", queried_edges)
+    }
 }
