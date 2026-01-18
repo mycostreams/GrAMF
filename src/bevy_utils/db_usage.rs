@@ -4,6 +4,7 @@ use std::thread::JoinHandle;
 
 use crate::bevy_utils::db_setup::run_db_service;
 use crate::graph_model::edges::EdgeFull;
+use crate::graph_model::nodes::NodeID;
 use crossbeam_channel::unbounded;
 use crossbeam_channel::{Receiver, Sender};
 
@@ -19,6 +20,35 @@ pub fn edge_db_plugin(app: &mut App) {
         .add_systems(Update, db_event_sender)
         .add_systems(Update, db_event_receiver)
         .add_systems(Update, db_shutdown);
+}
+
+/// Kinds of messages that can be sent to the database.
+///
+/// For now, we focus on inserting and querying edges and a shutdown.
+/// TODO: Add function to add column to edges and fill with data (e.g. BC calculation for graph)
+#[derive(Message, Clone, Debug)]
+pub(crate) enum DbRequestEvent {
+    Startup,
+    InsertEdges(Vec<EdgeFull>),
+    QueryEdges(Vec<NodeID>),
+    Shutdown,
+}
+
+/// Responses that can be obtained from the db.
+#[derive(Message, Debug)]
+pub(crate) enum DbResponseEvent {
+    Started,
+    InsertProgress { inserted: usize },
+    Edges(Vec<EdgeFull>),
+    ShutdownComplete,
+}
+
+/// Bevy Resource for sending and interpreting db messages.
+#[derive(Resource)]
+pub(crate) struct DbWorker {
+    pub(crate) tx: Sender<DbRequestEvent>,
+    pub(crate) rx: Receiver<DbResponseEvent>,
+    pub(crate) handle: Option<JoinHandle<()>>,
 }
 
 fn setup_database(mut commands: Commands) {
@@ -50,35 +80,6 @@ fn setup_database(mut commands: Commands) {
         rx: rx_res,
         handle: Some(handle),
     });
-}
-
-/// Kinds of messages that can be sent to the database.
-///
-/// For now, we focus on inserting and querying edges and a shutdown.
-/// TODO: Add function to add column to edges and fill with data (e.g. BC calculation for graph)
-#[derive(Message, Clone, Debug)]
-pub(crate) enum DbRequestEvent {
-    Startup,
-    InsertEdges(Vec<EdgeFull>),
-    QueryEdges(Vec<i64>),
-    Shutdown,
-}
-
-/// Responses that can be obtained from the db.
-#[derive(Message, Debug)]
-pub(crate) enum DbResponseEvent {
-    Started,
-    InsertProgress { inserted: usize },
-    Edges(Vec<EdgeFull>),
-    ShutdownComplete,
-}
-
-/// Bevy Resource for sending and interpreting db messages.
-#[derive(Resource)]
-pub(crate) struct DbWorker {
-    pub(crate) tx: Sender<DbRequestEvent>,
-    pub(crate) rx: Receiver<DbResponseEvent>,
-    pub(crate) handle: Option<JoinHandle<()>>,
 }
 
 /// Read from messages, and send them to the db.
@@ -126,11 +127,11 @@ fn test_db_system() {
 
     app.update();
 
-    let db_rec_messages = app.world().resource::<Messages<DbResponseEvent>>();
+    let db_res_messages = app.world().resource::<Messages<DbResponseEvent>>();
 
-    println!("{}", db_rec_messages.len());
+    println!("{}", db_res_messages.len());
 
-    let mut enemy_died_cursor = db_rec_messages.get_cursor();
-    let enemy_died = enemy_died_cursor.read(db_rec_messages).next().unwrap();
+    let mut enemy_died_cursor = db_res_messages.get_cursor();
+    let enemy_died = enemy_died_cursor.read(db_res_messages).next().unwrap();
     println!("{:?}", enemy_died);
 }

@@ -1,8 +1,11 @@
-use bevy::{ecs::component::Component, math::Vec3};
+use bevy::{ecs::component::Component, math::Vec3, ui::Node};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 
-use crate::graph_model::types::TimeSeries;
+use crate::graph_model::{nodes::NodeID, types::TimeSeries};
+
+pub type EdgeID = i64;
+pub type EdgeClusterID = i64;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum EdgeProgress {
@@ -19,9 +22,9 @@ pub enum EdgeProgress {
 #[derive(Debug, Clone, Copy)]
 pub struct EdgeLight {
     pub node_poss: (Vec3, Vec3),
-    pub source: usize,
-    pub target: usize,
-    pub id: usize,
+    pub source: NodeID,
+    pub target: NodeID,
+    pub id: EdgeID,
 }
 
 impl EdgeLight {
@@ -32,10 +35,10 @@ impl EdgeLight {
 
 #[derive(Clone, Component, Debug)]
 pub struct EdgeFull {
-    pub source: i64,
-    pub target: i64,
-    pub id: i64,
-    pub edge_cluster_id: i64,
+    pub source: NodeID,
+    pub target: NodeID,
+    pub id: EdgeID,
+    pub edge_cluster_id: EdgeClusterID,
     pub temporal_props: TimeSeries<EdgeTemporals>,
 }
 
@@ -51,8 +54,8 @@ impl EdgeFull {
         EdgeFull {
             source: 0,
             target: 1,
-            id: 1,
-            edge_cluster_id: 3,
+            id: 0,
+            edge_cluster_id: 0,
             temporal_props: TimeSeries {
                 timestamps: vec![EdgeTemporals::new()],
             },

@@ -1,4 +1,4 @@
-use crate::graph_model::{edges::EdgeLight, nodes::NodeData};
+use crate::graph_model::{edges::EdgeLight, nodes::{NodeData, NodeID}};
 use bevy::{math::Vec3, prelude::Resource};
 use petgraph::graph::{NodeIndex, UnGraph};
 
@@ -22,7 +22,7 @@ pub struct Spore {
 #[derive(Debug, Default)]
 pub struct SpatioTemporalGraph {
     pub graph: UnGraph<NodeData, EdgeLight>,
-    pub nodes_map: std::collections::HashMap<usize, NodeIndex>,
+    pub nodes_map: std::collections::HashMap<NodeID, NodeIndex>,
     pub spores: Vec<Spore>,
     pub metadata: Metadata,
 }
@@ -139,7 +139,7 @@ impl SpatioTemporalGraph {
 
         for (idx, node) in nodes.iter().enumerate() {
             let node_idx = stg.graph.add_node(*node);
-            stg.nodes_map.insert(idx, node_idx);
+            stg.nodes_map.insert(idx.try_into().unwrap(), node_idx);
         }
 
         stg.graph.add_edge(

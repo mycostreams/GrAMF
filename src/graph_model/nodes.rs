@@ -2,15 +2,17 @@ use bevy::math::Vec3;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
+pub type NodeID = i64;
+
 #[derive(Debug, Clone, Default, Copy, Serialize, Deserialize)]
 pub struct NodeData {
     pub pos: Vec3,
-    pub id: usize,
+    pub id: NodeID,
 }
 
 impl From<NodeData> for NodeIndex {
     fn from(value: NodeData) -> Self {
-        NodeIndex::new(value.id)
+        NodeIndex::new(value.id.try_into().unwrap())
     }
 }
 

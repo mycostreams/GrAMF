@@ -19,21 +19,11 @@ enum RequestHandleResult {
     Shutdown,
 }
 
-/// Opens (or creates) a filepath at the default application data path.
-/// Might need to be moved to IO
-fn open_default_path_db() -> String {
-    let data_dir = dirs_next::data_dir().unwrap().join("grAMF");
-    std::fs::create_dir_all(&data_dir).unwrap();
-    let binding = data_dir.join("gramf.db");
-    let data_path = binding.to_str().expect("REASON");
-    data_path.to_string()
-}
-
 /// Creation of the database, should only be called at the start of the app.
 /// Continually runs during the app, consuming request events.
 pub(super) fn run_db_service(rx_req: Receiver<DbRequestEvent>, tx_res: Sender<DbResponseEvent>) {
     println!("Starting Service");
-    let mut service = DbService::new(&open_default_path_db()).unwrap();
+    let mut service = DbService::new(&crate::io::db_io::open_default_path_db()).unwrap();
 
     println!("Created db service");
 
@@ -146,29 +136,21 @@ impl DbService {
             return Err(rusqlite::Error::InvalidQuery);
         }
 
-        let placeholders = edge_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let edge_ids_sql_format = edge_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
-        let sql = format!(
+        let sql_command = format!(
             "
             SELECT   edge_id, source, target, cluster_id, temporal_props
             FROM edge
             WHERE edge_id IN ({})
             ",
-            placeholders
+            edge_ids_sql_format
         );
 
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = self.conn.prepare(&sql_command)?;
 
         let rows = stmt.query_map(params_from_iter(edge_ids.iter()), |row| {
-            let blob: Vec<u8> = row.get(4)?;
-            let temporal_props: TimeSeries<EdgeTemporals> = postcard::from_bytes(&blob).unwrap();
-            Ok(EdgeFull {
-                id: row.get(0)?,
-                source: row.get(1)?,
-                target: row.get(2)?,
-                edge_cluster_id: row.get(3)?,
-                temporal_props,
-            })
+            parse_sql_edge_row(row)
         })?;
 
         let mut results: Vec<EdgeFull> = Vec::new();
@@ -178,6 +160,19 @@ impl DbService {
 
         Ok(results)
     }
+}
+
+fn parse_sql_edge_row(row: &rusqlite::Row<'_>) -> Result<EdgeFull, rusqlite::Error> {
+    let temporal_props_blob: Vec<u8> = row.get(4)?;
+    let temporal_props: TimeSeries<EdgeTemporals> =
+        postcard::from_bytes(&temporal_props_blob).unwrap();
+    Ok(EdgeFull {
+        id: row.get(0)?,
+        source: row.get(1)?,
+        target: row.get(2)?,
+        edge_cluster_id: row.get(3)?,
+        temporal_props,
+    })
 }
 
 #[cfg(test)]
