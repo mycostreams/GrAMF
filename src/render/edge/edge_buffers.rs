@@ -1,6 +1,7 @@
 use crate::graph::model::GraphModel;
 use crate::render::buffers::EdgeVertex;
 use glam::Vec2;
+use petgraph::visit::EdgeRef;
 use wgpu::util::DeviceExt;
 
 pub struct EdgeBuffers {
@@ -10,15 +11,18 @@ pub struct EdgeBuffers {
 }
 
 impl EdgeBuffers {
-    pub fn new(device: &wgpu::Device, graph: &GraphModel) -> Self {
+    pub fn new(device: &wgpu::Device, graph: &mut &GraphModel) -> Self {
         let mut edge_vertices = Vec::new();
         let mut edge_indices = Vec::new();
         let mut quad_count = 0;
-        for (a, b) in &graph.edges {
-            let pa = graph.nodes[*a as usize];
-            let pb = graph.nodes[*b as usize];
-            let width = 0.1;
-            let color = 1.0;
+        for edge in graph
+            .graph
+            .edge_references()
+        {
+            let pa = graph.graph.node_weight(edge.source()).unwrap().position;
+            let pb = graph.graph.node_weight(edge.target()).unwrap().position;
+            let width = edge.weight().width;
+            let color = edge.weight().value;
             let dir = (pb - pa).normalize();
             let perp = Vec2::new(-dir.y, dir.x);
             let halfw = width * 0.5;
