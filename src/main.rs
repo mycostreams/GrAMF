@@ -1,46 +1,21 @@
-use crate::{
-    bevy_utils::camera_controls::camera_controls_plugin,
-    gramf_ui::{ui_graph::spawn_graph, ui_layout::ui_system},
-    graph_model::stg_graphs::SnapshotGraph,
-};
-use bevy::prelude::*;
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+mod app;
+mod ui;
 
-/// Bevy utilities module containing various helper functions and structures to
-/// integrate crate structures with Bevy's ECS system.
-pub mod bevy_utils;
-
-/// grAMF UI module containing widgets and UI layout definitions.
-pub mod gramf_ui;
-
-/// Graphs module containing various graph implementations and related structures.
-pub mod graph_model;
-pub mod io;
+use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() {
-    App::new()
-        // .add_message::<ResetCameraEvent>()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "GrAMF".into(),
-                resolution: (1280, 720).into(),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }))
-        .add_plugins(EguiPlugin::default())
-        .add_systems(Startup, setup)
-        .add_plugins(camera_controls_plugin)
-        .add_systems(EguiPrimaryContextPass, ui_system)
-        .init_resource::<SnapshotGraph>()
-        .run();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        pollster::block_on(run());
+    }
 }
 
-fn setup(mut commands: Commands, mut stg_graph: ResMut<SnapshotGraph>) {
-    // Camera
-    commands.spawn(Camera2d);
+async fn run() {
+    let event_loop = EventLoop::new().unwrap();
 
-    *stg_graph = SnapshotGraph::generate_simple();
+    event_loop.set_control_flow(ControlFlow::Poll);
 
-    spawn_graph(&stg_graph, &mut commands);
+    let mut app = app::app::App::new();
+
+    event_loop.run_app(&mut app).expect("Failed to run app");
 }
