@@ -15,10 +15,7 @@ impl EdgeBuffers {
         let mut edge_vertices = Vec::new();
         let mut edge_indices = Vec::new();
         let mut quad_count = 0;
-        for edge in graph
-            .graph
-            .edge_references()
-        {
+        for edge in graph.graph.edge_references() {
             let pa = graph.graph.node_weight(edge.source()).unwrap().position;
             let pb = graph.graph.node_weight(edge.target()).unwrap().position;
             let width = edge.weight().width;

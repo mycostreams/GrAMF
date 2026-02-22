@@ -12,7 +12,8 @@ pub struct NodeBuffers {
 impl NodeBuffers {
     pub fn new(device: &wgpu::Device, graph: &GraphModel) -> Self {
         let instances: Vec<NodeInstance> = graph
-            .graph.node_weights()
+            .graph
+            .node_weights()
             .map(|p| NodeInstance {
                 position: [p.position.x, p.position.y],
                 value: p.value,
