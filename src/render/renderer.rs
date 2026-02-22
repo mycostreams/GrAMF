@@ -1,5 +1,5 @@
 use crate::graph::model::GraphModel;
-use crate::render::buffers::{CameraUniform, NodeInstance, QuadVertex, quad_indices, quad_vertices};
+use crate::render::buffers::{CameraUniform, NodeInstance, QuadVertex, QUAD_INDICES, QUAD_VERTICES};
 use wgpu::util::DeviceExt;
 
 pub struct GraphRenderer {
@@ -95,7 +95,7 @@ impl GraphRenderer {
         let quad_vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Quad Vertex Buffer"),
-                contents: bytemuck::cast_slice(&quad_vertices),
+                contents: bytemuck::cast_slice(&QUAD_VERTICES),
                 usage: wgpu::BufferUsages::VERTEX,
             },
         );
@@ -103,7 +103,7 @@ impl GraphRenderer {
         let quad_index_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Quad Index Buffer"),
-                contents: bytemuck::cast_slice(quad_indices),
+                contents: bytemuck::cast_slice(QUAD_INDICES),
                 usage: wgpu::BufferUsages::INDEX,
             },
         );

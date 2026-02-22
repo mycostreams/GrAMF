@@ -26,11 +26,11 @@ pub struct QuadVertex {
     pub pos: [f32; 2], // local quad coordinates
 }
 
-pub const quad_vertices: [QuadVertex; 4] = [
+pub const QUAD_VERTICES: [QuadVertex; 4] = [
     QuadVertex { pos: [-1.0, -1.0] },
     QuadVertex { pos: [ 1.0, -1.0] },
     QuadVertex { pos: [ 1.0,  1.0] },
     QuadVertex { pos: [-1.0,  1.0] },
 ];
 
-pub const quad_indices: &[u16] = &[0, 1, 2, 0, 2, 3];
+pub const QUAD_INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
