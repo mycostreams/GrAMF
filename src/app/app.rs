@@ -1,5 +1,6 @@
 use egui_wgpu::wgpu::SurfaceError;
 use egui_wgpu::{ScreenDescriptor, wgpu};
+use std::os::macos::raw::stat;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -42,7 +43,7 @@ impl App {
             surface,
             &window,
             initial_width,
-            initial_width,
+            initial_height,
         )
         .await;
 
@@ -206,7 +207,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 if let Some(state) = self.state.as_mut() {
-                    state.camera.zoom(delta);
+                    state
+                        .camera
+                        .zoom(delta, self.window.as_ref().unwrap().inner_size().into());
                 }
             }
             _ => (),
