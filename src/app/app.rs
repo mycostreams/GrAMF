@@ -101,8 +101,10 @@ impl App {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         // Update camera buffer with correct aspect ratio
-        let aspect = state.surface_config.width as f32 / state.surface_config.height as f32;
-        let camera_matrix = state.camera.matrix(aspect);
+        let camera_matrix = state.camera.matrix_equal_aspect(
+            state.surface_config.width as f32,
+            state.surface_config.height as f32,
+        );
         let camera_uniform = crate::render::buffers::CameraUniform {
             view_proj: camera_matrix.to_cols_array_2d(),
         };

@@ -18,7 +18,12 @@ impl Camera {
         }
     }
 
-    pub fn matrix(&self, aspect: f32) -> Mat4 {
+    pub fn matrix_equal_aspect(&self, width: f32, height: f32) -> Mat4 {
+        let aspect = width / height;
+        self.matrix(aspect)
+    }
+
+    fn matrix(&self, aspect: f32) -> Mat4 {
         let scale = 1.0 / self.zoom_factor;
 
         let proj =
@@ -32,14 +37,14 @@ impl Camera {
     pub fn zoom(&mut self, delta: MouseScrollDelta) {
         let scroll = match delta {
             MouseScrollDelta::LineDelta(_, y) => y,
-            MouseScrollDelta::PixelDelta(p) => p.y as f32,
+            MouseScrollDelta::PixelDelta(p) => p.y as f32 / 15.0,
         };
 
         self.zoom_factor *= (1.0 + scroll * 0.1).max(0.1);
     }
 
     pub fn mouse_input(&mut self, state: ElementState, button: MouseButton) {
-        if button == MouseButton::Left {
+        if button == MouseButton::Right {
             self.dragging = state == ElementState::Pressed;
             if !self.dragging {
                 self.last_cursor = None;
@@ -53,7 +58,8 @@ impl Camera {
         if self.dragging {
             if let Some(last) = self.last_cursor {
                 let delta = (current - last) * 0.002 / self.zoom_factor;
-                self.center -= delta;
+                self.center.x -= delta.x;
+                self.center.y += delta.y;
             }
         }
 
