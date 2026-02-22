@@ -95,13 +95,13 @@ impl Camera {
     pub fn cursor_moved(&mut self, pos: winit::dpi::PhysicalPosition<f64>) {
         let current = Vec2::new(pos.x as f32, pos.y as f32);
 
-        if self.dragging {
-            if let Some(last) = self.last_cursor {
+        if self.dragging 
+            && let Some(last) = self.last_cursor {
                 let delta = (current - last) * 0.002 / self.zoom_factor;
                 self.center.x -= delta.x;
                 self.center.y += delta.y;
             }
-        }
+        
 
         self.last_cursor = Some(current);
     }

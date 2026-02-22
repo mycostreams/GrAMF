@@ -54,7 +54,7 @@ impl GraphRenderer {
         });
 
         // --- Node setup ---
-        let node_buffers = NodeBuffers::new(device, &mut graph);
+        let node_buffers = NodeBuffers::new(device, graph);
         let node_pipeline = node_pipeline(device, config, &camera_bind_group_layout);
 
         // --- Edge setup ---

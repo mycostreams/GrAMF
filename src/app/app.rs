@@ -59,13 +59,12 @@ impl App {
 
     fn handle_redraw(&mut self) {
         // Attempt to handle minimizing window
-        if let Some(window) = self.window.as_ref() {
-            if let Some(min) = window.is_minimized() {
-                if min {
-                    println!("Window is minimized");
-                    return;
-                }
-            }
+        if let Some(window) = self.window.as_ref()
+            && let Some(min) = window.is_minimized()
+            && min
+        {
+            println!("Window is minimized");
+            return;
         }
 
         let state = self.state.as_mut().unwrap();
