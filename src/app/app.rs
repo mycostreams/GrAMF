@@ -1,6 +1,5 @@
 use egui_wgpu::wgpu::SurfaceError;
 use egui_wgpu::{ScreenDescriptor, wgpu};
-use std::os::macos::raw::stat;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -131,6 +130,9 @@ impl App {
 
                     if ui.button("Button!").clicked() {
                         println!("boom!")
+                    }
+                    if ui.button("Reset Camera").clicked() {
+                        state.camera.reset();
                     }
 
                     ui.separator();

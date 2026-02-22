@@ -105,4 +105,9 @@ impl Camera {
 
         self.last_cursor = Some(current);
     }
+
+    pub fn reset(&mut self) {
+        self.center = Vec2::ZERO;
+        self.zoom_factor = 1.0;
+    }
 }
