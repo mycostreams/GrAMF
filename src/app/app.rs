@@ -31,6 +31,7 @@ impl App {
         let initial_height = 768;
 
         let _ = window.request_inner_size(PhysicalSize::new(initial_width, initial_height));
+        window.set_title("GrAMF - Graph Analysis and Modeling Framework");
 
         let surface = self
             .instance
