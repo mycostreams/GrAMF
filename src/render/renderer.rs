@@ -1,23 +1,18 @@
 use crate::graph::model::GraphModel;
-use crate::render::buffers::{
-    CameraUniform, NodeInstance, QUAD_INDICES, QUAD_VERTICES, QuadVertex,
-};
+use crate::render::buffers::{CameraUniform, NodeInstance, QuadVertex};
+use crate::render::edge_buffers::EdgeBuffers;
+use crate::render::node_buffers::NodeBuffers;
 use wgpu::util::DeviceExt;
 
 pub struct GraphRenderer {
     pub node_pipeline: wgpu::RenderPipeline,
     pub edge_pipeline: wgpu::RenderPipeline,
 
-    pub node_instance_buffer: wgpu::Buffer,
-    pub edge_vertex_buffer: wgpu::Buffer,
-    pub quad_vertex_buffer: wgpu::Buffer,
-    pub quad_index_buffer: wgpu::Buffer,
+    pub node_buffers: NodeBuffers,
+    pub edge_buffers: EdgeBuffers,
 
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group: wgpu::BindGroup,
-
-    pub node_count: u32,
-    pub edge_vertex_count: u32,
 }
 
 impl GraphRenderer {
@@ -26,17 +21,15 @@ impl GraphRenderer {
         config: &wgpu::SurfaceConfiguration,
         graph: &GraphModel,
     ) -> Self {
-        // --- Camera ---
+        // --- Camera setup ---
         let camera_uniform = CameraUniform {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
         };
-
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[camera_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
@@ -51,7 +44,6 @@ impl GraphRenderer {
                 }],
                 label: Some("camera layout"),
             });
-
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
@@ -61,67 +53,18 @@ impl GraphRenderer {
             label: Some("camera bind group"),
         });
 
-        // --- Node Instance Buffer ---
-        let instances: Vec<NodeInstance> = graph
-            .nodes
-            .iter()
-            .map(|p| NodeInstance {
-                position: [p.x, p.y],
-                value: 0.0,
-                _pad: 0.0,
-            })
-            .collect();
-
-        let node_instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Node Instance Buffer"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // --- Edge Vertex Buffer (expanded to line vertices) ---
-        let mut edge_vertices = Vec::new();
-        for (a, b) in &graph.edges {
-            let pa = graph.nodes[*a as usize];
-            let pb = graph.nodes[*b as usize];
-            edge_vertices.push([pa.x, pa.y]);
-            edge_vertices.push([pb.x, pb.y]);
-        }
-
-        let edge_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Edge Vertex Buffer"),
-            contents: bytemuck::cast_slice(&edge_vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let quad_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Quad Vertex Buffer"),
-            contents: bytemuck::cast_slice(&QUAD_VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let quad_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Quad Index Buffer"),
-            contents: bytemuck::cast_slice(QUAD_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        // --- Pipelines ---
+        // --- Node setup ---
+        let node_buffers = NodeBuffers::new(device, graph);
+        // Node pipeline: renders nodes as instanced quads
         let node_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Node Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/node.wgsl").into()),
         });
-
-        let edge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Edge Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/edge.wgsl").into()),
-        });
-
         let node_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Node Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
-
         let node_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Node Pipeline"),
             layout: Some(&node_pipeline_layout),
@@ -167,12 +110,18 @@ impl GraphRenderer {
             cache: None,
         });
 
+        // --- Edge setup ---
+        let edge_buffers = EdgeBuffers::new(device, graph);
+        // Edge pipeline: renders edges as lines
+        let edge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Edge Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/edge.wgsl").into()),
+        });
         let edge_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Edge Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
-
         let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Edge Pipeline"),
             layout: Some(&edge_pipeline_layout),
@@ -181,9 +130,9 @@ impl GraphRenderer {
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: (std::mem::size_of::<f32>() * 2) as wgpu::BufferAddress,
+                    array_stride: std::mem::size_of::<crate::render::buffers::EdgeVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -197,7 +146,7 @@ impl GraphRenderer {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -214,14 +163,10 @@ impl GraphRenderer {
         Self {
             node_pipeline,
             edge_pipeline,
-            node_instance_buffer,
-            edge_vertex_buffer,
-            quad_vertex_buffer,
-            quad_index_buffer,
+            node_buffers,
+            edge_buffers,
             camera_buffer,
             camera_bind_group,
-            node_count: instances.len() as u32,
-            edge_vertex_count: edge_vertices.len() as u32,
         }
     }
 
@@ -246,18 +191,25 @@ impl GraphRenderer {
             // --- Draw Edges ---
             rpass.set_pipeline(&self.edge_pipeline);
             rpass.set_bind_group(0, &self.camera_bind_group, &[]);
-            rpass.set_vertex_buffer(0, self.edge_vertex_buffer.slice(..));
-            rpass.draw(0..self.edge_vertex_count, 0..1);
+            rpass.set_vertex_buffer(0, self.edge_buffers.edge_vertex_buffer.slice(..));
+            rpass.set_index_buffer(
+                self.edge_buffers.edge_index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            rpass.draw_indexed(0..(self.edge_buffers.quad_count * 6), 0, 0..1);
 
             // --- Draw Nodes ---
             rpass.set_pipeline(&self.node_pipeline);
             rpass.set_bind_group(0, &self.camera_bind_group, &[]);
 
-            rpass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
-            rpass.set_vertex_buffer(1, self.node_instance_buffer.slice(..));
-            rpass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            rpass.set_vertex_buffer(0, self.node_buffers.quad_vertex_buffer.slice(..));
+            rpass.set_vertex_buffer(1, self.node_buffers.node_instance_buffer.slice(..));
+            rpass.set_index_buffer(
+                self.node_buffers.quad_index_buffer.slice(..),
+                wgpu::IndexFormat::Uint16,
+            );
 
-            rpass.draw_indexed(0..6, 0, 0..self.node_count);
+            rpass.draw_indexed(0..6, 0, 0..self.node_buffers.node_count);
         }
     }
 }
