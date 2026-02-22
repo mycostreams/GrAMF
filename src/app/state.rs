@@ -1,6 +1,7 @@
+use crate::graph::model::GraphModel;
+use crate::render::renderer::GraphRenderer;
 use crate::ui::egui_overlay::EguiRenderer;
 use egui_wgpu::wgpu;
-use std::sync::Arc;
 use winit::window::Window;
 
 pub struct AppState {
@@ -10,6 +11,7 @@ pub struct AppState {
     pub surface: wgpu::Surface<'static>,
     pub scale_factor: f32,
     pub egui_renderer: EguiRenderer,
+    pub graph_renderer: GraphRenderer,
 }
 
 impl AppState {
@@ -57,7 +59,7 @@ impl AppState {
             width,
             height,
             present_mode: wgpu::PresentMode::AutoVsync,
-            desired_maximum_frame_latency: 0,
+            desired_maximum_frame_latency: 2,
             alpha_mode: swapchain_capabilities.alpha_modes[0],
             view_formats: vec![],
         };
@@ -65,6 +67,9 @@ impl AppState {
         surface.configure(&device, &surface_config);
 
         let egui_renderer = EguiRenderer::new(&device, surface_config.format, None, 1, window);
+
+        let graph = GraphModel::demo();
+        let graph_renderer = GraphRenderer::new(&device, &surface_config, &graph);
 
         let scale_factor = 1.0;
 
@@ -74,6 +79,7 @@ impl AppState {
             surface,
             surface_config,
             egui_renderer,
+            graph_renderer,
             scale_factor,
         }
     }
@@ -84,4 +90,3 @@ impl AppState {
         self.surface.configure(&self.device, &self.surface_config);
     }
 }
-

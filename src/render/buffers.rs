@@ -1,3 +1,5 @@
+use bytemuck::{Pod, Zeroable};
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct NodeInstance {
@@ -14,8 +16,8 @@ struct EdgeInstance {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
+pub struct CameraUniform {
+    pub view_proj: [[f32; 4]; 4],
 }
 
 #[repr(C)]
@@ -24,11 +26,11 @@ pub struct QuadVertex {
     pub pos: [f32; 2], // local quad coordinates
 }
 
-const quad_vertices: [QuadVertex; 4] = [
+pub const quad_vertices: [QuadVertex; 4] = [
     QuadVertex { pos: [-1.0, -1.0] },
     QuadVertex { pos: [ 1.0, -1.0] },
     QuadVertex { pos: [ 1.0,  1.0] },
     QuadVertex { pos: [-1.0,  1.0] },
 ];
 
-const quad_indices: &[u16] = &[0, 1, 2, 0, 2, 3];
+pub const quad_indices: &[u16] = &[0, 1, 2, 0, 2, 3];

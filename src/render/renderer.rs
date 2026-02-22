@@ -1,14 +1,15 @@
-pub struct Renderer {
-    surface: wgpu::Surface,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+use crate::graph::model::GraphModel;
+use crate::render::buffers::{CameraUniform, NodeInstance, QuadVertex, quad_indices, quad_vertices};
+use wgpu::util::DeviceExt;
 
+pub struct GraphRenderer {
     node_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
 
-    node_buffer: wgpu::Buffer,
+    node_instance_buffer: wgpu::Buffer,
     edge_vertex_buffer: wgpu::Buffer,
+    quad_vertex_buffer: wgpu::Buffer,
+    quad_index_buffer: wgpu::Buffer,
 
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -17,34 +18,12 @@ pub struct Renderer {
     edge_vertex_count: u32,
 }
 
-impl Renderer {
-    pub async fn new(window: &winit::window::Window, graph: &GraphModel) -> Self {
-        let size = window.inner_size();
-
-        let instance = wgpu::Instance::default();
-        let surface = unsafe { instance.create_surface(window) }.unwrap();
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await
-            .unwrap();
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default(), None)
-            .await
-            .unwrap();
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_capabilities(&adapter).formats[0],
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            view_formats: vec![],
-        };
-
-        surface.configure(&device, &config);
+impl GraphRenderer {
+    pub fn new(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        graph: &GraphModel,
+    ) -> Self {
 
         // --- Camera ---
         let camera_uniform = CameraUniform {
@@ -81,21 +60,7 @@ impl Renderer {
             label: Some("camera bind group"),
         });
 
-        // --- Node Buffer ---
-        let node_instances: Vec<NodeInstance> = graph
-            .nodes
-            .iter()
-            .map(|p| NodeInstance {
-                position: [p.x, p.y],
-            })
-            .collect();
-
-        let node_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Node Buffer"),
-            contents: bytemuck::cast_slice(&node_instances),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
+        // --- Node Instance Buffer ---
         let instances: Vec<NodeInstance> = graph.nodes.iter().map(|p| {
             NodeInstance {
                 position: [p.x, p.y],
@@ -121,6 +86,12 @@ impl Renderer {
             edge_vertices.push([pb.x, pb.y]);
         }
 
+        let edge_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Edge Vertex Buffer"),
+            contents: bytemuck::cast_slice(&edge_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let quad_vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Quad Vertex Buffer"),
@@ -137,46 +108,142 @@ impl Renderer {
             },
         );
 
-        // --- Pipelines created here (omitted for brevity below) ---
+        // --- Pipelines ---
+        let node_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Node Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/node.wgsl").into()),
+        });
+
+        let edge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Edge Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/edge.wgsl").into()),
+        });
+
+        let node_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Node Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let node_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Node Pipeline"),
+            layout: Some(&node_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &node_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<QuadVertex>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<NodeInstance>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32, 3 => Float32],
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &node_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let edge_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Edge Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Edge Pipeline"),
+            layout: Some(&edge_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &edge_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (std::mem::size_of::<f32>() * 2) as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &edge_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
 
         Self {
-            surface,
-            device,
-            queue,
-            config,
             node_pipeline,
             edge_pipeline,
-            node_buffer,
+            node_instance_buffer,
             edge_vertex_buffer,
+            quad_vertex_buffer,
+            quad_index_buffer,
             camera_buffer,
             camera_bind_group,
-            node_count: node_instances.len() as u32,
+            node_count: instances.len() as u32,
             edge_vertex_count: edge_vertices.len() as u32,
         }
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&Default::default());
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
+    pub fn render(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+                label: Some("Graph Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: true,
+                        store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
             });
 
             // --- Draw Edges ---
@@ -195,10 +262,5 @@ impl Renderer {
 
             rpass.draw_indexed(0..6, 0, 0..self.node_count);
         }
-
-        self.queue.submit(Some(encoder.finish()));
-        output.present();
-
-        Ok(())
     }
 }

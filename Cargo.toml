@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 wgpu = "*"
 winit = "*"
-# glam = "*"
+glam = "*"
 bytemuck = { version = "*", features = ["derive"] }
 pollster = "*"
 egui-wgpu = "0.33.3"

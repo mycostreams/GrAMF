@@ -100,6 +100,9 @@ impl App {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+        state.graph_renderer.render(&mut encoder, &surface_view);
+
+
         let window = self.window.as_ref().unwrap();
 
         {
