@@ -100,8 +100,19 @@ impl App {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        state.graph_renderer.render(&mut encoder, &surface_view);
+        // Update camera buffer with correct aspect ratio
+        let aspect = state.surface_config.width as f32 / state.surface_config.height as f32;
+        let camera_matrix = state.camera.matrix(aspect);
+        let camera_uniform = crate::render::buffers::CameraUniform {
+            view_proj: camera_matrix.to_cols_array_2d(),
+        };
+        state.queue.write_buffer(
+            &state.graph_renderer.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_uniform]),
+        );
 
+        state.graph_renderer.render(&mut encoder, &surface_view);
 
         let window = self.window.as_ref().unwrap();
 
@@ -172,11 +183,29 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw();
-
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Resized(new_size) => {
                 self.handle_resized(new_size.width, new_size.height);
+            }
+            WindowEvent::MouseInput {
+                state: mouse_state,
+                button,
+                ..
+            } => {
+                if let Some(state) = self.state.as_mut() {
+                    state.camera.mouse_input(mouse_state, button);
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(state) = self.state.as_mut() {
+                    state.camera.cursor_moved(position);
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if let Some(state) = self.state.as_mut() {
+                    state.camera.zoom(delta);
+                }
             }
             _ => (),
         }

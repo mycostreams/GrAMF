@@ -4,6 +4,8 @@ use crate::ui::egui_overlay::EguiRenderer;
 use egui_wgpu::wgpu;
 use winit::window::Window;
 
+use crate::render::camera::Camera;
+
 pub struct AppState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -12,6 +14,7 @@ pub struct AppState {
     pub scale_factor: f32,
     pub egui_renderer: EguiRenderer,
     pub graph_renderer: GraphRenderer,
+    pub camera: Camera,
 }
 
 impl AppState {
@@ -72,6 +75,7 @@ impl AppState {
         let graph_renderer = GraphRenderer::new(&device, &surface_config, &graph);
 
         let scale_factor = 1.0;
+        let camera = Camera::new();
 
         Self {
             device,
@@ -80,6 +84,7 @@ impl AppState {
             surface_config,
             egui_renderer,
             graph_renderer,
+            camera,
             scale_factor,
         }
     }
