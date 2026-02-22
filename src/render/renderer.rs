@@ -1,21 +1,23 @@
 use crate::graph::model::GraphModel;
-use crate::render::buffers::{CameraUniform, NodeInstance, QuadVertex, QUAD_INDICES, QUAD_VERTICES};
+use crate::render::buffers::{
+    CameraUniform, NodeInstance, QUAD_INDICES, QUAD_VERTICES, QuadVertex,
+};
 use wgpu::util::DeviceExt;
 
 pub struct GraphRenderer {
-    node_pipeline: wgpu::RenderPipeline,
-    edge_pipeline: wgpu::RenderPipeline,
+    pub node_pipeline: wgpu::RenderPipeline,
+    pub edge_pipeline: wgpu::RenderPipeline,
 
-    node_instance_buffer: wgpu::Buffer,
-    edge_vertex_buffer: wgpu::Buffer,
-    quad_vertex_buffer: wgpu::Buffer,
-    quad_index_buffer: wgpu::Buffer,
+    pub node_instance_buffer: wgpu::Buffer,
+    pub edge_vertex_buffer: wgpu::Buffer,
+    pub quad_vertex_buffer: wgpu::Buffer,
+    pub quad_index_buffer: wgpu::Buffer,
 
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    pub camera_buffer: wgpu::Buffer,
+    pub camera_bind_group: wgpu::BindGroup,
 
-    node_count: u32,
-    edge_vertex_count: u32,
+    pub node_count: u32,
+    pub edge_vertex_count: u32,
 }
 
 impl GraphRenderer {
@@ -24,7 +26,6 @@ impl GraphRenderer {
         config: &wgpu::SurfaceConfiguration,
         graph: &GraphModel,
     ) -> Self {
-
         // --- Camera ---
         let camera_uniform = CameraUniform {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
@@ -61,21 +62,21 @@ impl GraphRenderer {
         });
 
         // --- Node Instance Buffer ---
-        let instances: Vec<NodeInstance> = graph.nodes.iter().map(|p| {
-            NodeInstance {
+        let instances: Vec<NodeInstance> = graph
+            .nodes
+            .iter()
+            .map(|p| NodeInstance {
                 position: [p.x, p.y],
                 value: 0.0,
                 _pad: 0.0,
-            }
-        }).collect();
+            })
+            .collect();
 
-        let node_instance_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Node Instance Buffer"),
-                contents: bytemuck::cast_slice(&instances),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            },
-        );
+        let node_instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Node Instance Buffer"),
+            contents: bytemuck::cast_slice(&instances),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
 
         // --- Edge Vertex Buffer (expanded to line vertices) ---
         let mut edge_vertices = Vec::new();
@@ -92,21 +93,17 @@ impl GraphRenderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let quad_vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Quad Vertex Buffer"),
-                contents: bytemuck::cast_slice(&QUAD_VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            },
-        );
+        let quad_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Quad Vertex Buffer"),
+            contents: bytemuck::cast_slice(&QUAD_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
-        let quad_index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Quad Index Buffer"),
-                contents: bytemuck::cast_slice(QUAD_INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            },
-        );
+        let quad_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Quad Index Buffer"),
+            contents: bytemuck::cast_slice(QUAD_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
 
         // --- Pipelines ---
         let node_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

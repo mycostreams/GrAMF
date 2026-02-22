@@ -28,9 +28,9 @@ pub struct QuadVertex {
 
 pub const QUAD_VERTICES: [QuadVertex; 4] = [
     QuadVertex { pos: [-1.0, -1.0] },
-    QuadVertex { pos: [ 1.0, -1.0] },
-    QuadVertex { pos: [ 1.0,  1.0] },
-    QuadVertex { pos: [-1.0,  1.0] },
+    QuadVertex { pos: [1.0, -1.0] },
+    QuadVertex { pos: [1.0, 1.0] },
+    QuadVertex { pos: [-1.0, 1.0] },
 ];
 
 pub const QUAD_INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];

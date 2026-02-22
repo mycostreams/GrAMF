@@ -21,14 +21,8 @@ impl Camera {
     pub fn matrix(&self, aspect: f32) -> Mat4 {
         let scale = 1.0 / self.zoom_factor;
 
-        let proj = Mat4::orthographic_rh_gl(
-            -aspect * scale,
-            aspect * scale,
-            -scale,
-            scale,
-            -1.0,
-            1.0,
-        );
+        let proj =
+            Mat4::orthographic_rh_gl(-aspect * scale, aspect * scale, -scale, scale, -1.0, 1.0);
 
         let view = Mat4::from_translation((-self.center).extend(0.0));
 

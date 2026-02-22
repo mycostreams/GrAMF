@@ -1,7 +1,7 @@
 mod app;
-mod ui;
 mod graph;
 mod render;
+mod ui;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 
