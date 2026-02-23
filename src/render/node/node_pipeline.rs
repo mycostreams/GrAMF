@@ -31,7 +31,7 @@ pub(crate) fn node_pipeline(
                 wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<NodeInstance>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32, 3 => Float32],
+                    attributes: &wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32x3, 3 => Float32],
                 },
             ],
         },

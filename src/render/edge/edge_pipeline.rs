@@ -23,7 +23,7 @@ pub(crate) fn edge_pipeline(
                 array_stride: std::mem::size_of::<crate::render::buffers::EdgeVertex>()
                     as wgpu::BufferAddress,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32],
+                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32x3],
             }],
         },
         fragment: Some(wgpu::FragmentState {
