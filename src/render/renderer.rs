@@ -1,4 +1,4 @@
-use crate::graph::model::GraphModel;
+use crate::graph::topology::GraphTopology;
 use crate::render::buffers::CameraUniform;
 use crate::render::edge::edge_buffers::EdgeBuffers;
 use crate::render::node::node_buffers::NodeBuffers;
@@ -19,7 +19,7 @@ impl GraphRenderer {
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
-        mut graph: &GraphModel,
+        mut graph: &GraphTopology,
     ) -> Self {
         // --- Camera setup ---
         let camera_uniform = CameraUniform {

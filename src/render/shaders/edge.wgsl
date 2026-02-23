@@ -26,6 +26,6 @@ fn vs_main(input: VSIn) -> VSOut {
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-    // For now, just use color as grayscale; later, use a colormap
-    return vec4<f32>(input.color.r, input.color.g, input.color.b, 1.0);
+    // Output supplied RGB color directly
+    return vec4<f32>(input.color, 1.0);
 }

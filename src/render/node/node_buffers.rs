@@ -1,4 +1,4 @@
-use crate::graph::model::GraphModel;
+use crate::graph::topology::GraphTopology;
 use crate::render::buffers::{NodeInstance, QUAD_INDICES, QUAD_VERTICES};
 use wgpu::util::DeviceExt;
 
@@ -10,13 +10,13 @@ pub struct NodeBuffers {
 }
 
 impl NodeBuffers {
-    pub fn new(device: &wgpu::Device, graph: &GraphModel) -> Self {
+    pub fn new(device: &wgpu::Device, graph: &GraphTopology) -> Self {
         let instances: Vec<NodeInstance> = graph
             .graph
             .node_weights()
             .map(|p| NodeInstance {
                 position: [p.position.x, p.position.y],
-                value: p.value,
+                color: p.color,
                 _pad: 0.0,
             })
             .collect();

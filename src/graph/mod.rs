@@ -1,3 +1,2 @@
-mod geometry;
-mod metrics;
-pub mod model;
+mod properties;
+pub mod topology;

@@ -1,17 +1,18 @@
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct EdgeVertex {
-    pub pos: [f32; 2],
-    pub width: f32,
-    pub color: f32, // to be mapped by colormap later
-}
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub struct EdgeVertex {
+    pub pos: [f32; 2],
+    pub width: f32,
+    pub color: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct NodeInstance {
     pub position: [f32; 2],
-    pub value: f32, // ready for colormap later
+    pub color: [f32; 3],
     pub _pad: f32,
 }
 

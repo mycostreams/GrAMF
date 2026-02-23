@@ -1,4 +1,4 @@
-use crate::graph::model::GraphModel;
+use crate::graph::topology::GraphTopology;
 use crate::render::renderer::GraphRenderer;
 use crate::ui::egui_overlay::EguiRenderer;
 use egui_wgpu::wgpu;
@@ -71,7 +71,9 @@ impl AppState {
 
         let egui_renderer = EguiRenderer::new(&device, surface_config.format, None, 1, window);
 
-        let graph = GraphModel::demo();
+        let graph = GraphTopology::demo();
+
+        println!("{:?}", graph);
         let graph_renderer = GraphRenderer::new(&device, &surface_config, &graph);
 
         let scale_factor = 1.0;
