@@ -11,7 +11,7 @@ pub type EdgeId = u64;
 pub struct VisualNode {
     pub position: Vec2,
     pub color: [f32; 3],
-    radius: f32,
+    pub radius: f32,
 }
 
 #[repr(C)]

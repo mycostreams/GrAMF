@@ -25,15 +25,31 @@ impl PropertyStore {
         }
     }
 
-    pub fn insert_node(&mut self, node_id: NodeId, properties: Vec<Column>) -> PolarsResult<()> {
+    pub fn insert_node(&mut self, node_id: NodeId, properties: Vec<Series>) -> PolarsResult<()> {
         let mut row = vec![
-            Column::new("node_id".into(), &[node_id]),
-            Column::new("is_active".into(), &[true]),
+            Series::new("node_id".into(), &[node_id]),
+            Series::new("is_active".into(), &[true]),
         ];
-
         row.extend(properties);
 
-        let df = DataFrame::new(1, row)?;
+        // Add new columns to self.nodes if needed
+        let mut new_col_names = Vec::new();
+        for s in &row {
+            let name = s.name();
+            if self.nodes.get_column_names().iter().all(|n| *n != name) {
+                new_col_names.push(name.clone());
+            }
+        }
+        for name in new_col_names {
+            // Fill with nulls for existing rows
+            let dtype = row.iter().find(|s| *s.name() == name).unwrap().dtype();
+            let len = self.nodes.height();
+            let new_col = Column::full_null(name.clone(), len, dtype);
+            self.nodes.with_column(new_col)?;
+        }
+
+        let columns: Vec<Column> = row.into_iter().map(|s| Column::from(s)).collect();
+        let df = DataFrame::new(1, columns)?;
         self.nodes.vstack_mut(&df)?;
         Ok(())
     }

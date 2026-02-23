@@ -17,3 +17,5 @@ redb = "3.1.0"
 colorcet = "0.2.2"
 polars = { version = "*", features = ["lazy", "is_in"]}
 geo = "0.32.0"
+serde = "1.0.228"
+serde_json = "1.0.149"

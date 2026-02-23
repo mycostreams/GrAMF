@@ -1462,6 +1462,8 @@ dependencies = [
  "polars",
  "pollster",
  "redb",
+ "serde",
+ "serde_json",
  "wgpu",
  "winit",
 ]
