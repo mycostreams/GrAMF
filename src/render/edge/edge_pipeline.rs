@@ -12,7 +12,7 @@ pub(crate) fn edge_pipeline(
         bind_group_layouts: &[&camera_bind_group_layout],
         push_constant_ranges: &[],
     });
-    let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("Edge Pipeline"),
         layout: Some(&edge_pipeline_layout),
         vertex: wgpu::VertexState {
@@ -49,6 +49,5 @@ pub(crate) fn edge_pipeline(
         multisample: wgpu::MultisampleState::default(),
         multiview: None,
         cache: None,
-    });
-    edge_pipeline
+    })
 }

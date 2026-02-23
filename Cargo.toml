@@ -15,5 +15,5 @@ egui-winit = "0.33.3"
 petgraph = "0.8.3"
 redb = "3.1.0"
 colorcet = "0.2.2"
-polars = "0.53.0"
+polars = { version = "*", features = ["lazy", "is_in"]}
 geo = "0.32.0"

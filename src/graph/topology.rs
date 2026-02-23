@@ -6,7 +6,6 @@ use petgraph::prelude::*;
 pub type NodeId = u64;
 pub type EdgeId = u64;
 
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct VisualNode {
@@ -14,7 +13,6 @@ pub struct VisualNode {
     pub color: [f32; 3],
     radius: f32,
 }
-
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -27,14 +25,14 @@ pub struct VisualEdge {
 pub struct GraphTopology {
     pub graph: Graph<VisualNode, VisualEdge, Undirected>,
 
-    node_id_to_index: std::collections::HashMap<NodeId, NodeIndex>,
-    edge_id_to_index: std::collections::HashMap<EdgeId, EdgeIndex>,
+    pub node_id_to_index: std::collections::HashMap<NodeId, NodeIndex>,
+    pub edge_id_to_index: std::collections::HashMap<EdgeId, EdgeIndex>,
 
-    node_index_to_id: Vec<Option<NodeId>>,
-    edge_index_to_id: Vec<Option<EdgeId>>,
+    pub node_index_to_id: Vec<Option<NodeId>>,
+    pub edge_index_to_id: Vec<Option<EdgeId>>,
 
-    node_next_id: NodeId,
-    edge_next_id: EdgeId,
+    pub node_next_id: NodeId,
+    pub edge_next_id: EdgeId,
 }
 
 impl GraphTopology {
@@ -98,6 +96,23 @@ impl GraphTopology {
         id
     }
 
+    pub fn neighbors(&self, id: NodeId) -> Vec<NodeId> {
+        let idx = self.node_id_to_index[&id];
+
+        self.graph
+            .neighbors(idx)
+            .filter_map(|n| self.node_index_to_id[n.index()])
+            .collect()
+    }
+
+    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.node_id_to_index.keys().cloned()
+    }
+
+    pub fn edge_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.edge_id_to_index.keys().cloned()
+    }
+
     pub fn demo() -> Self {
         let mut triangle_graph = GraphTopology::empty();
         let node_color = [0.2, 0.7, 1.0];
@@ -110,19 +125,19 @@ impl GraphTopology {
         });
         let n1 = triangle_graph.add_node(VisualNode {
             position: Vec2::new(0.5, -0.5),
-            color: node_color.clone(),
+            color: node_color,
             radius: 0.05,
         });
         let n2 = triangle_graph.add_node(VisualNode {
             position: Vec2::new(0.0, 0.5),
-            color: node_color.clone(),
+            color: node_color,
             radius: 0.05,
         });
         triangle_graph.add_edge(
             n0,
             n1,
             VisualEdge {
-                color: edge_color.clone(),
+                color: edge_color,
                 width: 0.02,
             },
         );
@@ -130,7 +145,7 @@ impl GraphTopology {
             n1,
             n2,
             VisualEdge {
-                color: edge_color.clone(),
+                color: edge_color,
                 width: 0.02,
             },
         );
@@ -143,5 +158,93 @@ impl GraphTopology {
             },
         );
         triangle_graph
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_and_remove_node() {
+        let mut g = GraphTopology::empty();
+        let node = VisualNode {
+            position: Vec2::ZERO,
+            color: [1.0, 0.0, 0.0],
+            radius: 1.0,
+        };
+        let id = g.add_node(node);
+        assert!(g.node_id_to_index.contains_key(&id));
+        g.remove_node(id);
+        assert!(!g.node_id_to_index.contains_key(&id));
+    }
+
+    #[test]
+    fn test_add_and_remove_edge() {
+        let mut g = GraphTopology::empty();
+        let n0 = g.add_node(VisualNode {
+            position: Vec2::ZERO,
+            color: [1.0, 0.0, 0.0],
+            radius: 1.0,
+        });
+        let n1 = g.add_node(VisualNode {
+            position: Vec2::ONE,
+            color: [0.0, 1.0, 0.0],
+            radius: 1.0,
+        });
+        let edge = VisualEdge {
+            color: [0.0, 0.0, 1.0],
+            width: 1.0,
+        };
+        let eid = g.add_edge(n0, n1, edge);
+        assert!(g.edge_id_to_index.contains_key(&eid));
+        g.remove_edge(eid);
+        assert!(!g.edge_id_to_index.contains_key(&eid));
+    }
+
+    #[test]
+    fn test_neighbors() {
+        let mut g = GraphTopology::empty();
+        let n0 = g.add_node(VisualNode {
+            position: Vec2::ZERO,
+            color: [1.0, 0.0, 0.0],
+            radius: 1.0,
+        });
+        let n1 = g.add_node(VisualNode {
+            position: Vec2::ONE,
+            color: [0.0, 1.0, 0.0],
+            radius: 1.0,
+        });
+        let n2 = g.add_node(VisualNode {
+            position: Vec2::new(2.0, 0.0),
+            color: [0.0, 0.0, 1.0],
+            radius: 1.0,
+        });
+        g.add_edge(
+            n0,
+            n1,
+            VisualEdge {
+                color: [1.0, 1.0, 1.0],
+                width: 1.0,
+            },
+        );
+        g.add_edge(
+            n1,
+            n2,
+            VisualEdge {
+                color: [1.0, 1.0, 1.0],
+                width: 1.0,
+            },
+        );
+        let neighbors: Vec<_> = g.neighbors(n1);
+        assert!(neighbors.contains(&n0));
+        assert!(neighbors.contains(&n2));
+    }
+
+    #[test]
+    fn test_demo_graph() {
+        let g = GraphTopology::demo();
+        assert_eq!(g.graph.node_count(), 3);
+        assert_eq!(g.graph.edge_count(), 3);
     }
 }
