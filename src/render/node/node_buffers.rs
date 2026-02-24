@@ -20,7 +20,11 @@ impl NodeBuffers {
                 _pad: 0.0,
             })
             .collect();
-        queue.write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&instances));
+        queue.write_buffer(
+            &self.node_instance_buffer,
+            0,
+            bytemuck::cast_slice(&instances),
+        );
         self.node_count = instances.len() as u32;
     }
 

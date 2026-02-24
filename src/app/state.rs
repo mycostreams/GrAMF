@@ -19,7 +19,6 @@ pub struct AppState {
     pub graph_renderer: GraphRenderer,
     pub camera: Camera,
     // pub hover_control: HoverControl,
-
     pub graph: GraphEngine,
 }
 

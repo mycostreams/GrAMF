@@ -88,13 +88,33 @@ impl EdgeBuffers {
             let v1 = pa - perp * halfw;
             let v2 = pb - perp * halfw;
             let v3 = pb + perp * halfw;
-            edge_vertices.push(EdgeVertex { pos: [v0.x, v0.y], width, color });
-            edge_vertices.push(EdgeVertex { pos: [v1.x, v1.y], width, color });
-            edge_vertices.push(EdgeVertex { pos: [v2.x, v2.y], width, color });
-            edge_vertices.push(EdgeVertex { pos: [v3.x, v3.y], width, color });
+            edge_vertices.push(EdgeVertex {
+                pos: [v0.x, v0.y],
+                width,
+                color,
+            });
+            edge_vertices.push(EdgeVertex {
+                pos: [v1.x, v1.y],
+                width,
+                color,
+            });
+            edge_vertices.push(EdgeVertex {
+                pos: [v2.x, v2.y],
+                width,
+                color,
+            });
+            edge_vertices.push(EdgeVertex {
+                pos: [v3.x, v3.y],
+                width,
+                color,
+            });
             quad_count += 1;
         }
-        queue.write_buffer(&self.edge_vertex_buffer, 0, bytemuck::cast_slice(&edge_vertices));
+        queue.write_buffer(
+            &self.edge_vertex_buffer,
+            0,
+            bytemuck::cast_slice(&edge_vertices),
+        );
         self.quad_count = quad_count;
     }
 }
