@@ -19,3 +19,4 @@ polars = { version = "*", features = ["lazy", "is_in"]}
 geo = "0.32.0"
 serde = "1.0.228"
 serde_json = "1.0.149"
+rstar = "0.12.2"

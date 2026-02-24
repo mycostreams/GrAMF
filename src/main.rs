@@ -1,5 +1,6 @@
 mod app;
 mod graph;
+mod interaction;
 mod render;
 mod ui;
 
