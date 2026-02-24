@@ -8,6 +8,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use crate::app::state::AppState;
+// use crate::render::renderer;
 
 pub struct App {
     instance: wgpu::Instance,
@@ -114,41 +115,42 @@ impl App {
             bytemuck::cast_slice(&[camera_uniform]),
         );
 
-        state.graph_renderer.render(&mut encoder, &surface_view);
+        state
+            .graph_renderer
+            .node_buffers
+            .update_node_instances(&state.queue, &state.graph.topology);
+        state
+            .graph_renderer
+            .edge_buffers
+            .update_edge_vertices(&state.queue, &state.graph.topology);
+
+        state.graph_renderer.render(
+            // &state.queue,
+            // &state.graph.topology,
+            &mut encoder,
+            &surface_view,
+        );
 
         let window = self.window.as_ref().unwrap();
 
         {
             state.egui_renderer.begin_frame(window);
 
-            egui::Window::new("winit + egui + wgpu says hello!")
-                .resizable(true)
-                .vscroll(true)
-                .default_open(false)
-                .show(state.egui_renderer.context(), |ui| {
-                    ui.label("Label!");
-
-                    if ui.button("Button!").clicked() {
-                        println!("boom!")
-                    }
-                    if ui.button("Reset Camera").clicked() {
-                        state.camera.reset();
-                    }
-
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label(format!(
-                            "Pixels per point: {}",
-                            state.egui_renderer.context().pixels_per_point()
-                        ));
-                        if ui.button("-").clicked() {
-                            state.scale_factor = (state.scale_factor - 0.1).max(0.3);
-                        }
-                        if ui.button("+").clicked() {
-                            state.scale_factor = (state.scale_factor + 0.1).min(3.0);
+            egui::TopBottomPanel::top("Menu Panel").show(state.egui_renderer.context(), |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Quit").clicked() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                            std::process::exit(0);
                         }
                     });
+                    ui.menu_button("View", |ui| {
+                        if ui.button("Reset camera").clicked() {
+                            state.camera.reset();
+                        }
+                    })
                 });
+            });
 
             state.egui_renderer.end_frame_and_draw(
                 &state.device,
@@ -205,6 +207,14 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(state) = self.state.as_mut() {
                     state.camera.cursor_moved(position);
+                    // Convert position to logical coordinates
+                    let mouse_pos = glam::Vec2::new(position.x as f32, position.y as f32);
+                    // Set highlight colors
+                    let highlight_node = [1.0, 0.5, 0.0]; // orange
+                    let highlight_edge = [1.0, 0.0, 0.0]; // red
+                    let default_node = [0.2, 0.7, 1.0]; // blue
+                    let default_edge = [1.0, 1.0, 1.0]; // white
+                    self.handle_redraw();
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
