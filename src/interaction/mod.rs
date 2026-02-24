@@ -1,3 +1,3 @@
 mod editing;
-mod picking;
 mod input;
+mod picking;
