@@ -1,4 +1,7 @@
-use crate::graph::topology::GraphTopology;
+use crate::graph::controller::GraphEngine;
+// use crate::interaction::HoverControl;
+// pub hover_control: HoverControl,
+// use crate::graph::topology::GraphTopology;
 use crate::render::renderer::GraphRenderer;
 use crate::ui::egui_overlay::EguiRenderer;
 use egui_wgpu::wgpu;
@@ -15,6 +18,9 @@ pub struct AppState {
     pub egui_renderer: EguiRenderer,
     pub graph_renderer: GraphRenderer,
     pub camera: Camera,
+    // pub hover_control: HoverControl,
+
+    pub graph: GraphEngine,
 }
 
 impl AppState {
@@ -71,10 +77,10 @@ impl AppState {
 
         let egui_renderer = EguiRenderer::new(&device, surface_config.format, None, 1, window);
 
-        let graph = GraphTopology::demo();
+        let graph_engine = GraphEngine::demo();
 
-        println!("{:?}", graph);
-        let graph_renderer = GraphRenderer::new(&device, &surface_config, &graph);
+        println!("{:?}", graph_engine.topology);
+        let graph_renderer = GraphRenderer::new(&device, &surface_config, &graph_engine.topology);
 
         let scale_factor = 1.0;
         let camera = Camera::new();
@@ -88,6 +94,8 @@ impl AppState {
             graph_renderer,
             camera,
             scale_factor,
+            // hover_control: HoverControl::new(),
+            graph: graph_engine,
         }
     }
 

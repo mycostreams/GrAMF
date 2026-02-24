@@ -20,6 +20,13 @@ impl GraphEngine {
         }
     }
 
+    pub fn demo() -> Self {
+        Self {
+            topology: GraphTopology::demo(),
+            properties: PropertyStore::new(),
+        }
+    }
+
     pub fn add_node(&mut self, visual: VisualNode, properties: Vec<Series>) -> NodeId {
         let id = self.topology.add_node(visual);
         self.properties.insert_node(id, properties).unwrap();
