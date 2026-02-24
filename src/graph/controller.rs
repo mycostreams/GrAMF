@@ -4,11 +4,13 @@ use polars::prelude::NamedFrom;
 use polars::series::Series;
 
 use crate::graph::properties::PropertyStore;
+use crate::graph::r_tree::index_controller::SpatialIndex;
 use crate::graph::topology::NodeId;
 use crate::graph::topology::{GraphTopology, VisualNode};
 
 pub struct GraphEngine {
     pub topology: GraphTopology,
+    pub rtree: SpatialIndex,
     pub properties: PropertyStore,
 }
 
@@ -17,6 +19,7 @@ impl GraphEngine {
         Self {
             topology: GraphTopology::empty(),
             properties: PropertyStore::new(),
+            rtree: SpatialIndex::new()
         }
     }
 
@@ -24,6 +27,7 @@ impl GraphEngine {
         Self {
             topology: GraphTopology::demo(),
             properties: PropertyStore::new(),
+            rtree: SpatialIndex::from_topology(GraphTopology::demo())
         }
     }
 
@@ -70,7 +74,6 @@ impl GraphEngine {
 mod tests {
     use super::*;
     use glam::Vec2;
-    use polars::prelude::*;
     use std::collections::HashMap;
 
     #[test]
