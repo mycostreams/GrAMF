@@ -56,7 +56,7 @@ impl EdgeBuffers {
         let edge_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Edge Quad Vertex Buffer"),
             contents: bytemuck::cast_slice(&edge_vertices),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
         let edge_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Edge Quad Index Buffer"),
@@ -68,5 +68,33 @@ impl EdgeBuffers {
             edge_index_buffer,
             quad_count,
         }
+    }
+
+    /// Update edge vertex buffer with new color/width data from the graph
+    pub fn update_edge_vertices(&mut self, queue: &wgpu::Queue, graph: &GraphTopology) {
+        use glam::Vec2;
+        let mut edge_vertices = Vec::new();
+        let mut quad_count = 0;
+        for edge in graph.graph.edge_references() {
+            let pa = graph.graph.node_weight(edge.source()).unwrap().position;
+            let pb = graph.graph.node_weight(edge.target()).unwrap().position;
+            let width = edge.weight().width;
+            let color: [f32; 3] = edge.weight().color;
+            let dir = (pb - pa).normalize();
+            let perp = Vec2::new(-dir.y, dir.x);
+            let halfw = width * 0.5;
+            // Four quad vertices
+            let v0 = pa + perp * halfw;
+            let v1 = pa - perp * halfw;
+            let v2 = pb - perp * halfw;
+            let v3 = pb + perp * halfw;
+            edge_vertices.push(EdgeVertex { pos: [v0.x, v0.y], width, color });
+            edge_vertices.push(EdgeVertex { pos: [v1.x, v1.y], width, color });
+            edge_vertices.push(EdgeVertex { pos: [v2.x, v2.y], width, color });
+            edge_vertices.push(EdgeVertex { pos: [v3.x, v3.y], width, color });
+            quad_count += 1;
+        }
+        queue.write_buffer(&self.edge_vertex_buffer, 0, bytemuck::cast_slice(&edge_vertices));
+        self.quad_count = quad_count;
     }
 }

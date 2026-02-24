@@ -10,6 +10,20 @@ pub struct NodeBuffers {
 }
 
 impl NodeBuffers {
+    pub fn update_node_instances(&mut self, queue: &wgpu::Queue, graph: &GraphTopology) {
+        let instances: Vec<NodeInstance> = graph
+            .graph
+            .node_weights()
+            .map(|p| NodeInstance {
+                position: [p.position.x, p.position.y],
+                color: p.color,
+                _pad: 0.0,
+            })
+            .collect();
+        queue.write_buffer(&self.node_instance_buffer, 0, bytemuck::cast_slice(&instances));
+        self.node_count = instances.len() as u32;
+    }
+
     pub fn new(device: &wgpu::Device, graph: &GraphTopology) -> Self {
         let instances: Vec<NodeInstance> = graph
             .graph
@@ -28,7 +42,7 @@ impl NodeBuffers {
         let quad_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Quad Vertex Buffer"),
             contents: bytemuck::cast_slice(&QUAD_VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
         let quad_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Quad Index Buffer"),
