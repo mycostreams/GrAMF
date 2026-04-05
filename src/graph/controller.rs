@@ -6,7 +6,7 @@ use polars::series::Series;
 use crate::graph::properties::PropertyStore;
 use crate::graph::r_tree::index_controller::SpatialIndex;
 use crate::graph::topology::NodeId;
-use crate::graph::topology::{GraphTopology, VisualNode};
+use crate::graph::topology::{EdgeId, GraphTopology, VisualEdge, VisualNode};
 
 pub struct GraphEngine {
     pub topology: GraphTopology,
@@ -19,7 +19,7 @@ impl GraphEngine {
         Self {
             topology: GraphTopology::empty(),
             properties: PropertyStore::new(),
-            rtree: SpatialIndex::new()
+            rtree: SpatialIndex::new(),
         }
     }
 
@@ -27,7 +27,7 @@ impl GraphEngine {
         Self {
             topology: GraphTopology::demo(),
             properties: PropertyStore::new(),
-            rtree: SpatialIndex::from_topology(GraphTopology::demo())
+            rtree: SpatialIndex::from_topology(GraphTopology::demo()),
         }
     }
 
@@ -60,6 +60,27 @@ impl GraphEngine {
     pub fn remove_node(&mut self, id: NodeId) {
         self.topology.remove_node(id);
         self.properties.mark_inactive(id).unwrap();
+        // Note: rtree removal not implemented yet
+    }
+
+    pub fn add_edge(&mut self, source: NodeId, target: NodeId, visual: VisualEdge) -> EdgeId {
+        let edge_id = self.topology.add_edge(source, target, visual);
+        // Update rtree with edge - need node positions
+        if let (Some(source_node), Some(target_node)) = (
+            self.topology
+                .graph
+                .node_weight(self.topology.node_id_to_index[&source]),
+            self.topology
+                .graph
+                .node_weight(self.topology.node_id_to_index[&target]),
+        ) {
+            self.rtree.insert_edge(
+                edge_id,
+                [source_node.position.x, source_node.position.y],
+                [target_node.position.x, target_node.position.y],
+            );
+        }
+        edge_id
     }
 
     pub fn compute_subgraph(

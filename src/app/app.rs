@@ -1,3 +1,4 @@
+use egui::CentralPanel;
 use egui_wgpu::wgpu::SurfaceError;
 use egui_wgpu::{ScreenDescriptor, wgpu};
 use std::sync::Arc;
@@ -115,14 +116,16 @@ impl App {
             bytemuck::cast_slice(&[camera_uniform]),
         );
 
-        state
-            .graph_renderer
-            .node_buffers
-            .update_node_instances(&state.device, &state.queue, &state.graph.topology);
-        state
-            .graph_renderer
-            .edge_buffers
-            .update_edge_vertices(&state.device, &state.queue, &state.graph.topology);
+        state.graph_renderer.node_buffers.update_node_instances(
+            &state.device,
+            &state.queue,
+            &state.graph.topology,
+        );
+        state.graph_renderer.edge_buffers.update_edge_vertices(
+            &state.device,
+            &state.queue,
+            &state.graph.topology,
+        );
 
         state.graph_renderer.render(
             // &state.queue,
@@ -139,6 +142,30 @@ impl App {
             egui::TopBottomPanel::top("Menu Panel").show(state.egui_renderer.context(), |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     ui.menu_button("File", |ui| {
+                        if ui.button("Load GeoJSON").clicked() {
+                            let geojson_path: String = match tinyfiledialogs::open_file_dialog(
+                                "Open geojson...",
+                                "stg.geojson",
+                                None,
+                            ) {
+                                Some(path) => path,
+                                None => {
+                                    println!("No file selected");
+                                    return;
+                                }
+                            };
+                            match crate::graph::controller::GraphEngine::from_geojson_file(
+                                &geojson_path,
+                            ) {
+                                Ok(new_engine) => {
+                                    state.graph = new_engine;
+                                    println!("Loaded GeoJSON successfully");
+                                }
+                                Err(e) => {
+                                    println!("Failed to load GeoJSON: {}", e);
+                                }
+                            }
+                        }
                         if ui.button("Quit").clicked() {
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                             std::process::exit(0);
@@ -153,25 +180,25 @@ impl App {
             });
 
             // Context menu for graph area
-            let ctx = state.egui_renderer.context();
-            egui::Area::new(egui::Id::new("graph_context_menu"))
-                .interactable(true)
-                .show(ctx, |ui| {
-                    let rect = ui.ctx().content_rect();
-                    let response = ui.allocate_rect(rect, egui::Sense::click());
+            CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(egui::Color32::TRANSPARENT))
+                .show(state.egui_renderer.context(), |ui| {
+                    let response: egui::Response =
+                        ui.allocate_response(ui.available_size(), egui::Sense::click());
                     response.context_menu(|ui| {
-                        if ui.button("Add Node").clicked() {
-                            if let Some(pos) = state.right_click_pos {
-                                let window_size = (state.surface_config.width, state.surface_config.height);
-                                let world_pos = state.camera.screen_to_world(pos, window_size);
-                                let visual_node = crate::graph::topology::VisualNode {
-                                    position: world_pos,
-                                    color: [0.2, 0.7, 1.0], // default color
-                                    radius: 0.05,
-                                };
-                                state.graph.add_node(visual_node, vec![]);
-                                ui.close();
-                            }
+                        if ui.button("Add Node").clicked()
+                            && let Some(pos) = state.right_click_pos
+                        {
+                            let window_size =
+                                (state.surface_config.width, state.surface_config.height);
+                            let world_pos = state.camera.screen_to_world(pos, window_size);
+                            let visual_node = crate::graph::topology::VisualNode {
+                                position: world_pos,
+                                color: [0.2, 0.7, 1.0], // default color
+                                radius: 0.05,
+                            };
+                            state.graph.add_node(visual_node, vec![]);
+                            ui.close();
                         }
                     });
                 });
@@ -223,34 +250,31 @@ impl ApplicationHandler for App {
                 state: mouse_state,
                 button,
                 ..
-            } => {
-                match button {
-                    MouseButton::Left => {
-                        if let Some(state) = self.state.as_mut() {
-                            state.camera.mouse_input(mouse_state, button);
-                        }
+            } => match button {
+                MouseButton::Left => {
+                    if let Some(state) = self.state.as_mut() {
+                        state.camera.mouse_input(mouse_state, button);
                     }
-                    MouseButton::Right => {
-                        if mouse_state == ElementState::Released {
-                            if let Some(state) = self.state.as_mut() {
-                                state.right_click_pos = state.last_cursor_pos;
-                            }
-                        } else {
-                            if let Some(state) = self.state.as_mut() {
-                                state.right_click_pos = None;
-                            }
-                        }
-                    }
-                    MouseButton::Middle => {},
-                    MouseButton::Back => todo!(),
-                    MouseButton::Forward => todo!(),
-                    MouseButton::Other(_) => {},
                 }
-            }
+                MouseButton::Right => {
+                    if mouse_state == ElementState::Released {
+                        if let Some(state) = self.state.as_mut() {
+                            state.right_click_pos = state.last_cursor_pos;
+                        }
+                    } else if let Some(state) = self.state.as_mut() {
+                        state.right_click_pos = None;
+                    }
+                }
+                MouseButton::Middle => {}
+                MouseButton::Back => todo!(),
+                MouseButton::Forward => todo!(),
+                MouseButton::Other(_) => {}
+            },
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(state) = self.state.as_mut() {
                     state.camera.cursor_moved(position);
-                    state.last_cursor_pos = Some(glam::Vec2::new(position.x as f32, position.y as f32));
+                    state.last_cursor_pos =
+                        Some(glam::Vec2::new(position.x as f32, position.y as f32));
                     self.handle_redraw();
                 }
             }

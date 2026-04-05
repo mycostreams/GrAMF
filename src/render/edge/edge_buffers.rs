@@ -71,7 +71,12 @@ impl EdgeBuffers {
     }
 
     /// Update edge vertex buffer with new color/width data from the graph
-    pub fn update_edge_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, graph: &GraphTopology) {
+    pub fn update_edge_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        graph: &GraphTopology,
+    ) {
         use glam::Vec2;
         let mut edge_vertices = Vec::new();
         let mut quad_count = 0;
@@ -112,16 +117,24 @@ impl EdgeBuffers {
         }
         if quad_count != self.quad_count {
             // Recreate buffer with new size
-            self.edge_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Edge Quad Vertex Buffer"),
-                contents: bytemuck::cast_slice(&edge_vertices),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
+            self.edge_vertex_buffer =
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Edge Quad Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&edge_vertices),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                });
             // Also need to update indices if quad_count changed
             let mut edge_indices = Vec::new();
             for i in 0..quad_count {
                 let base = i * 4;
-                edge_indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                edge_indices.extend_from_slice(&[
+                    base,
+                    base + 1,
+                    base + 2,
+                    base,
+                    base + 2,
+                    base + 3,
+                ]);
             }
             self.edge_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Edge Quad Index Buffer"),

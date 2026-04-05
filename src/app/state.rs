@@ -22,6 +22,7 @@ pub struct AppState {
     pub graph: GraphEngine,
     pub last_cursor_pos: Option<glam::Vec2>,
     pub right_click_pos: Option<glam::Vec2>,
+    pub geojson_path: String,
 }
 
 impl AppState {
@@ -99,6 +100,7 @@ impl AppState {
             graph: graph_engine,
             last_cursor_pos: None,
             right_click_pos: None,
+            geojson_path: String::new(),
         }
     }
 

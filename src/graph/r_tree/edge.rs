@@ -1,5 +1,5 @@
-use rstar::{RTree, RTreeObject, AABB, PointDistance};
-use crate::graph::topology::{EdgeId};
+use crate::graph::topology::EdgeId;
+use rstar::{AABB, PointDistance, RTree, RTreeObject};
 
 #[derive(Clone)]
 pub struct SpatialEdge {
@@ -13,14 +13,8 @@ impl RTreeObject for SpatialEdge {
 
     fn envelope(&self) -> Self::Envelope {
         AABB::from_corners(
-            [
-                self.a[0].min(self.b[0]),
-                self.a[1].min(self.b[1]),
-            ],
-            [
-                self.a[0].max(self.b[0]),
-                self.a[1].max(self.b[1]),
-            ],
+            [self.a[0].min(self.b[0]), self.a[1].min(self.b[1])],
+            [self.a[0].max(self.b[0]), self.a[1].max(self.b[1])],
         )
     }
 }
@@ -35,8 +29,7 @@ impl PointDistance for SpatialEdge {
         let dx = x2 - x1;
         let dy = y2 - y1;
 
-        let t = ((x - x1) * dx + (y - y1) * dy)
-            / (dx * dx + dy * dy);
+        let t = ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy);
 
         let t = t.clamp(0.0, 1.0);
 

@@ -10,7 +10,12 @@ pub struct NodeBuffers {
 }
 
 impl NodeBuffers {
-    pub fn update_node_instances(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, graph: &GraphTopology) {
+    pub fn update_node_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        graph: &GraphTopology,
+    ) {
         let instances: Vec<NodeInstance> = graph
             .graph
             .node_weights()
@@ -22,11 +27,12 @@ impl NodeBuffers {
             .collect();
         if instances.len() as u32 != self.node_count {
             // Recreate buffer with new size
-            self.node_instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Node Instance Buffer"),
-                contents: bytemuck::cast_slice(&instances),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
+            self.node_instance_buffer =
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Node Instance Buffer"),
+                    contents: bytemuck::cast_slice(&instances),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                });
         } else {
             queue.write_buffer(
                 &self.node_instance_buffer,

@@ -109,7 +109,8 @@ impl Camera {
     pub fn screen_to_world(&self, screen_pos: Vec2, window_size: (u32, u32)) -> Vec2 {
         let aspect = window_size.0 as f32 / window_size.1 as f32;
         let scale = 1.0 / self.zoom_factor;
-        let proj = Mat4::orthographic_rh_gl(-aspect * scale, aspect * scale, -scale, scale, -1.0, 1.0);
+        let proj =
+            Mat4::orthographic_rh_gl(-aspect * scale, aspect * scale, -scale, scale, -1.0, 1.0);
         let view = Mat4::from_translation((-self.center).extend(0.0));
         let inv = (proj * view).inverse();
         let ndc = Vec2::new(

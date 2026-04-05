@@ -1,5 +1,5 @@
-use rstar::{RTreeObject, AABB, PointDistance};
-use crate::graph::topology::{NodeId};
+use crate::graph::topology::NodeId;
+use rstar::{AABB, PointDistance, RTreeObject};
 
 #[derive(Clone, PartialEq)]
 pub struct SpatialNode {
