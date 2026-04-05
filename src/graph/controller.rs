@@ -34,6 +34,7 @@ impl GraphEngine {
     pub fn add_node(&mut self, visual: VisualNode, properties: Vec<Series>) -> NodeId {
         let id = self.topology.add_node(visual);
         self.properties.insert_node(id, properties).unwrap();
+        self.rtree.insert_node(id, visual.position.into());
         id
     }
 

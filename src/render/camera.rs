@@ -84,7 +84,7 @@ impl Camera {
     }
 
     pub fn mouse_input(&mut self, state: ElementState, button: MouseButton) {
-        if button == MouseButton::Right {
+        if button == MouseButton::Left {
             self.dragging = state == ElementState::Pressed;
             if !self.dragging {
                 self.last_cursor = None;
@@ -104,6 +104,19 @@ impl Camera {
         }
 
         self.last_cursor = Some(current);
+    }
+
+    pub fn screen_to_world(&self, screen_pos: Vec2, window_size: (u32, u32)) -> Vec2 {
+        let aspect = window_size.0 as f32 / window_size.1 as f32;
+        let scale = 1.0 / self.zoom_factor;
+        let proj = Mat4::orthographic_rh_gl(-aspect * scale, aspect * scale, -scale, scale, -1.0, 1.0);
+        let view = Mat4::from_translation((-self.center).extend(0.0));
+        let inv = (proj * view).inverse();
+        let ndc = Vec2::new(
+            (screen_pos.x / window_size.0 as f32) * 2.0 - 1.0,
+            1.0 - (screen_pos.y / window_size.1 as f32) * 2.0,
+        );
+        inv.transform_point3(ndc.extend(0.0)).truncate()
     }
 
     pub fn reset(&mut self) {

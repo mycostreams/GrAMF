@@ -3,7 +3,7 @@ use egui_wgpu::{ScreenDescriptor, wgpu};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
+use winit::event::{MouseButton, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
@@ -118,11 +118,11 @@ impl App {
         state
             .graph_renderer
             .node_buffers
-            .update_node_instances(&state.queue, &state.graph.topology);
+            .update_node_instances(&state.device, &state.queue, &state.graph.topology);
         state
             .graph_renderer
             .edge_buffers
-            .update_edge_vertices(&state.queue, &state.graph.topology);
+            .update_edge_vertices(&state.device, &state.queue, &state.graph.topology);
 
         state.graph_renderer.render(
             // &state.queue,
@@ -151,6 +151,33 @@ impl App {
                     })
                 });
             });
+
+            // Context menu for graph area
+            let ctx = state.egui_renderer.context();
+            egui::Area::new(egui::Id::new("graph_context_menu"))
+                .interactable(true)
+                .show(ctx, |ui| {
+                    let rect = ui.ctx().content_rect();
+                    let response = ui.allocate_rect(rect, egui::Sense::click());
+                    response.context_menu(|ui| {
+                        if ui.button("Add Node").clicked() {
+                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                let window_size = (state.surface_config.width, state.surface_config.height);
+                                let world_pos = state.camera.screen_to_world(
+                                    glam::Vec2::new(pos.x, pos.y),
+                                    window_size
+                                );
+                                let visual_node = crate::graph::topology::VisualNode {
+                                    position: world_pos,
+                                    color: [0.2, 0.7, 1.0], // default color
+                                    radius: 0.05,
+                                };
+                                state.graph.add_node(visual_node, vec![]);
+                                ui.close();
+                            }
+                        }
+                    });
+                });
 
             state.egui_renderer.end_frame_and_draw(
                 &state.device,
@@ -200,8 +227,10 @@ impl ApplicationHandler for App {
                 button,
                 ..
             } => {
-                if let Some(state) = self.state.as_mut() {
-                    state.camera.mouse_input(mouse_state, button);
+                if button == MouseButton::Left {
+                    if let Some(state) = self.state.as_mut() {
+                        state.camera.mouse_input(mouse_state, button);
+                    }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
