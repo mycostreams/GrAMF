@@ -1,6 +1,7 @@
 use crate::graph::controller::GraphEngine;
 use crate::graph::topology::{VisualEdge, VisualNode};
 use glam::Vec2;
+use petgraph::graph;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -31,67 +32,88 @@ pub enum GeoJsonGeometry {
 
 impl GraphEngine {
     pub fn from_geojson_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        println!("Loading GeoJSON from: {}", path);
+
         let content = fs::read_to_string(path)?;
         let geojson: GeoJsonFeatureCollection = serde_json::from_str(&content)?;
 
         let mut engine = GraphEngine::new();
         let mut node_id_map = HashMap::new();
 
+        println!("Parsed GeoJSON: {} features", geojson.features.len());
+
         // First pass: collect all nodes
         for feature in &geojson.features {
-            if let GeoJsonGeometry::Point { coordinates } = &feature.geometry
-                && coordinates.len() >= 2
-            {
-                let x = coordinates[0] as f32;
-                let y = coordinates[1] as f32;
+            match &feature.geometry {
+                GeoJsonGeometry::Point { coordinates } if coordinates.len() >= 2 => {
+                    let (node_id, visual_node) = parse_point_feature(feature, coordinates);
+                    let graph_node_id = engine.add_node(visual_node, vec![]);
+                    node_id_map.insert(node_id, graph_node_id);
+                }
+                GeoJsonGeometry::LineString { coordinates: _ } => {
+                    let (graph_source, graph_target, visual_edge) =
+                        parse_line_string_feature(&node_id_map, feature);
 
-                // Scale coordinates to reasonable range (assuming input is in pixels)
-                // Scale down by dividing by 1000 to get reasonable world units
-                let scale = 0.001;
-                let world_pos = Vec2::new(x * scale, y * scale);
-
-                let node_id = feature.properties["id"]
-                    .as_u64()
-                    .unwrap_or_else(|| feature.properties["id"].as_i64().unwrap_or(0) as u64);
-
-                let visual_node = VisualNode {
-                    position: world_pos,
-                    color: [0.2, 0.7, 1.0], // default blue color
-                    radius: 0.05,
-                };
-
-                let graph_node_id = engine.add_node(visual_node, vec![]);
-                node_id_map.insert(node_id, graph_node_id);
+                    engine.add_edge(graph_source, graph_target, visual_edge);
+                }
+                _ => (),
             }
         }
 
-        // Second pass: collect all edges
-        for feature in &geojson.features {
-            if let GeoJsonGeometry::LineString { coordinates: _ } = &feature.geometry
-                && let (Some(source_id), Some(target_id)) = (
-                    feature.properties["source"]
-                        .as_u64()
-                        .or_else(|| feature.properties["source"].as_i64().map(|v| v as u64)),
-                    feature.properties["target"]
-                        .as_u64()
-                        .or_else(|| feature.properties["target"].as_i64().map(|v| v as u64)),
-                )
-                && let (Some(&graph_source), Some(&graph_target)) =
-                    (node_id_map.get(&source_id), node_id_map.get(&target_id))
-            {
-                let width = feature.properties["width"].as_f64().unwrap_or(0.02) as f32 * 0.001; // scale width too
-
-                let visual_edge = VisualEdge {
-                    color: [1.0, 1.0, 1.0], // default white color
-                    width,
-                };
-
-                engine.add_edge(graph_source, graph_target, visual_edge);
-            }
-        }
+        println!("Added edges to graph based on LineString features");
 
         Ok(engine)
     }
+}
+
+fn parse_line_string_feature(
+    node_id_map: &HashMap<u64, u64>,
+    feature: &GeoJsonFeature,
+) -> (u64, u64, VisualEdge) {
+    let (Some(source_id), Some(target_id)) = (
+        feature.properties["source"]
+            .as_u64()
+            .or_else(|| feature.properties["source"].as_i64().map(|v| v as u64)),
+        feature.properties["target"]
+            .as_u64()
+            .or_else(|| feature.properties["target"].as_i64().map(|v| v as u64)),
+    ) else {
+        panic!("LineString feature missing valid 'source' and 'target' properties");
+    };
+    let (Some(&graph_source), Some(&graph_target)) =
+        (node_id_map.get(&source_id), node_id_map.get(&target_id))
+    else {
+        panic!("LineString feature references unknown source or target node IDs");
+    };
+
+    let width = feature.properties["width"].as_f64().unwrap_or(0.02) as f32 * 0.001; // scale width too
+
+    let visual_edge = VisualEdge {
+        color: [1.0, 1.0, 1.0], // default white color
+        width,
+    };
+    (graph_source, graph_target, visual_edge)
+}
+
+fn parse_point_feature(feature: &GeoJsonFeature, coordinates: &Vec<f64>) -> (u64, VisualNode) {
+    let x = coordinates[0] as f32;
+    let y = coordinates[1] as f32;
+
+    // Scale coordinates to reasonable range (assuming input is in pixels)
+    // Scale down by dividing by 1000 to get reasonable world units
+    let scale = 0.001;
+    let world_pos = Vec2::new(x * scale, y * scale);
+
+    let node_id = feature.properties["id"]
+        .as_u64()
+        .unwrap_or_else(|| feature.properties["id"].as_i64().unwrap_or(0) as u64);
+
+    let visual_node = VisualNode {
+        position: world_pos,
+        color: [0.2, 0.7, 1.0], // default blue color
+        radius: 0.01,
+    };
+    (node_id, visual_node)
 }
 
 #[cfg(test)]
