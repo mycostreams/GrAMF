@@ -3,7 +3,7 @@ use egui_wgpu::{ScreenDescriptor, wgpu};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
@@ -161,12 +161,9 @@ impl App {
                     let response = ui.allocate_rect(rect, egui::Sense::click());
                     response.context_menu(|ui| {
                         if ui.button("Add Node").clicked() {
-                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                            if let Some(pos) = state.right_click_pos {
                                 let window_size = (state.surface_config.width, state.surface_config.height);
-                                let world_pos = state.camera.screen_to_world(
-                                    glam::Vec2::new(pos.x, pos.y),
-                                    window_size
-                                );
+                                let world_pos = state.camera.screen_to_world(pos, window_size);
                                 let visual_node = crate::graph::topology::VisualNode {
                                     position: world_pos,
                                     color: [0.2, 0.7, 1.0], // default color
@@ -227,22 +224,33 @@ impl ApplicationHandler for App {
                 button,
                 ..
             } => {
-                if button == MouseButton::Left {
-                    if let Some(state) = self.state.as_mut() {
-                        state.camera.mouse_input(mouse_state, button);
+                match button {
+                    MouseButton::Left => {
+                        if let Some(state) = self.state.as_mut() {
+                            state.camera.mouse_input(mouse_state, button);
+                        }
                     }
+                    MouseButton::Right => {
+                        if mouse_state == ElementState::Released {
+                            if let Some(state) = self.state.as_mut() {
+                                state.right_click_pos = state.last_cursor_pos;
+                            }
+                        } else {
+                            if let Some(state) = self.state.as_mut() {
+                                state.right_click_pos = None;
+                            }
+                        }
+                    }
+                    MouseButton::Middle => {},
+                    MouseButton::Back => todo!(),
+                    MouseButton::Forward => todo!(),
+                    MouseButton::Other(_) => {},
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(state) = self.state.as_mut() {
                     state.camera.cursor_moved(position);
-                    // Convert position to logical coordinates
-                    let mouse_pos = glam::Vec2::new(position.x as f32, position.y as f32);
-                    // Set highlight colors
-                    let highlight_node = [1.0, 0.5, 0.0]; // orange
-                    let highlight_edge = [1.0, 0.0, 0.0]; // red
-                    let default_node = [0.2, 0.7, 1.0]; // blue
-                    let default_edge = [1.0, 1.0, 1.0]; // white
+                    state.last_cursor_pos = Some(glam::Vec2::new(position.x as f32, position.y as f32));
                     self.handle_redraw();
                 }
             }

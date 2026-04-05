@@ -20,6 +20,8 @@ pub struct AppState {
     pub camera: Camera,
     // pub hover_control: HoverControl,
     pub graph: GraphEngine,
+    pub last_cursor_pos: Option<glam::Vec2>,
+    pub right_click_pos: Option<glam::Vec2>,
 }
 
 impl AppState {
@@ -95,6 +97,8 @@ impl AppState {
             scale_factor,
             // hover_control: HoverControl::new(),
             graph: graph_engine,
+            last_cursor_pos: None,
+            right_click_pos: None,
         }
     }
 
