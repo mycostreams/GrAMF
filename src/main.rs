@@ -1,34 +1,39 @@
-use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
-
+use gpui::*;
+use gpui_component::{button::*, *};
+use gpui_platform;
 // use crate::app::AppModel;
+use gpui_component_assets;
+
+use crate::app::gpui_app::AppModel;
 
 mod app;
-mod graph;
-mod render;
 mod ui;
-mod test;
 
 fn main() {
-    Application::new().run(|app: &mut App| {
+    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+
+    app.run(move |app| {
+        gpui_component::init(app);
+        app.set_global::<AppModel>(AppModel::new());
         let bounds = Bounds::centered(None, size(px(800.), px(600.)), app);
 
-        app.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
+        app.spawn(async move |cx| {
+            cx.open_window(WindowOptions{
+                titlebar: Some(TitlebarOptions { title: Some("GrAMF".into()), appears_transparent: false, traffic_light_position: None }),
+                window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
                 ..Default::default()
-            },
-            |window, app| {
-                let focus_handle = app.focus_handle();
-                focus_handle.focus(window);
-
-                app.new(ui::root_view::RootView::new)
-            },
-        )
-        .unwrap();
-        app.activate(true);
-        app.on_window_closed(|app| {
-            app.quit();
+            }, |window, cx| {
+                let view = cx.new(|cx| ui::root_view::RootView::new(cx));
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+            // cx.activate(true);
         })
         .detach();
+
+        app.activate(true);
+        app.on_window_closed(|cx, _| {
+            cx.quit();
+        }).detach();
     });
 }

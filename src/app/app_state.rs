@@ -14,4 +14,3 @@ pub struct AppState {
     pub graph_time: Option<usize>,
     pub selection: Option<Selection>,
 }
-    

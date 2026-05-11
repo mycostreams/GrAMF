@@ -1,11 +1,10 @@
 pub mod app_state;
-pub mod messages;
-pub mod controller;
 pub mod context;
-pub mod lifecycle;
-pub mod app_model;
+pub mod controller;
 pub mod gpui_app;
+pub mod lifecycle;
+pub mod messages;
 
 pub use app_state::*;
-pub use messages::*;
 pub use context::*;
+pub use messages::*;

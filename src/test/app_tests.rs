@@ -1,5 +1,4 @@
 // use crate::app::*;
-use crate::app::app_model::AppModel;
 use crate::app::context::AppContext;
 use crate::app::controller;
 use crate::app::app_state::AppState;

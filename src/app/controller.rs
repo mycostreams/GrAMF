@@ -1,13 +1,12 @@
 // app/controller.rs
 
-use crate::app::{app_state::{AppState, Selection}, context::AppContext, messages::{AppCommand, AppEvent}};
+use crate::app::{
+    app_state::{AppState, Selection},
+    context::AppContext,
+    messages::{AppCommand, AppEvent},
+};
 
-
-pub fn handle_event(
-    app: &mut AppState,
-    event: AppEvent,
-    ctx: &mut AppContext,
-) {
+pub fn handle_event(app: &mut AppState, event: AppEvent, ctx: &mut AppContext) {
     match event {
         AppEvent::SetTimeIndex(t) => {
             app.graph_time = Some(t);

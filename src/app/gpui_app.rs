@@ -4,9 +4,12 @@ use gpui::*;
 
 use crate::app;
 
+#[derive(Default)]
 pub struct AppModel {
     pub state: app::AppState,
 }
+
+impl Global for AppModel {}
 
 impl AppModel {
     pub fn new() -> Self {
