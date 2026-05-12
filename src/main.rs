@@ -1,15 +1,13 @@
 use gpui::*;
-use gpui_component::*;
+use gpui_component::{button::*, *};
 use gpui_platform;
 // use crate::app::AppModel;
 use gpui_component_assets;
 
 use crate::app::gpui_app::AppModel;
 
-mod app;
-mod graph;
+mod ap
 mod render;
-mod test;
 mod ui;
 
 fn main() {
@@ -40,5 +38,4 @@ fn main() {
             // cx.activate(true);
         })
         .detach();
-    });
-}
+    })
