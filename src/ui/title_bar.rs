@@ -1,13 +1,13 @@
-use gpui::{App, Context, Entity, InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Render, SharedString, Styled, Window, actions, div};
+use gpui::{App, Entity, IntoElement, Menu, MenuItem, ParentElement, SharedString, Styled, actions, div};
 use gpui_component::{
-    GlobalState, IconName, TitleBar, badge::Badge, button::{Button, ButtonVariants, DropdownButton}, menu::AppMenuBar
+    TitleBar, menu::AppMenuBar
 };
 
 actions!(file_menu_actions, [NewGraph, OpenGraph, SaveGraph, ExitApp,]);
 actions!(edit_menu_actions, [Undo, Redo,]);
 
 
-fn build_menus(title: impl Into<SharedString>, cx: &App) -> Vec<Menu> {  
+fn build_menus(_title: impl Into<SharedString>, _cx: &App) -> Vec<Menu> {  
     vec![  
         Menu {  
             name: "File".into(),  

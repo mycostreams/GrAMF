@@ -30,7 +30,7 @@ impl Render for RootView {
         _window: &mut gpui::Window,
         cx: &mut Context<'_, Self>,
     ) -> impl IntoElement {
-        let app = cx.global::<AppModel>();
+        let _app = cx.global::<AppModel>();
 
         div()
         .bg(rgb(0x1a1a1a))

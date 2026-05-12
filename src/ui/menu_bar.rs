@@ -1,5 +1,3 @@
-use gpui::*;
-use gpui_component::button::{Button, DropdownButton};
 
 
 // pub fn menu_bar(_cx: &mut App) -> impl IntoElement {

@@ -1,5 +1,5 @@
 use gpui::*;
-use gpui_component::{button::*, *};
+use gpui_component::*;
 use gpui_platform;
 // use crate::app::AppModel;
 use gpui_component_assets;
