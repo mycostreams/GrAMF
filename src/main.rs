@@ -7,6 +7,8 @@ use gpui_component_assets;
 use crate::app::gpui_app::AppModel;
 
 mod app;
+mod graph;
+mod render;
 mod test;
 mod ui;
 
