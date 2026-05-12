@@ -3,7 +3,6 @@ use gpui_component::menu::AppMenuBar;
 
 use crate::{app::gpui_app::AppModel, ui::title_bar::{self, init_app_menu}};
 
-use super::menu_bar;
 
 pub struct RootView {
     focus_handle: FocusHandle,
@@ -14,7 +13,7 @@ impl RootView {
     pub fn new(cx: &mut App) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
-            app_menu_bar: AppMenuBar::new(cx),
+            app_menu_bar: init_app_menu("GrAMF", cx),
         }
     }
 }
@@ -32,11 +31,11 @@ impl Render for RootView {
         cx: &mut Context<'_, Self>,
     ) -> impl IntoElement {
         let app = cx.global::<AppModel>();
-        let app_menu_bar = init_app_menu("GrAMF", cx);
 
         div()
+        .bg(rgb(0x1a1a1a))
             .child(
-                title_bar::title_bar(cx, app_menu_bar)
+                title_bar::title_bar(cx, self.app_menu_bar.clone())
             )
             .flex()
             .size_full()
