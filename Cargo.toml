@@ -6,11 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 bytemuck = "1.25.0"
-futures = "0.3.32"
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-serde = "1.0.228"
-wgpu = "29.0.3"
-winit = "0.30.13"
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+egui = "0.32.1"
+egui-wgpu = { version = "0.32.1", features = ["winit"] }
+egui-winit = "0.32.1"
+winit = "0.30.12"
+pollster = "0.4.0"
