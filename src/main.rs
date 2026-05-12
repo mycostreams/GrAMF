@@ -7,6 +7,7 @@ use gpui_component_assets;
 use crate::app::gpui_app::AppModel;
 
 mod app;
+mod test;
 mod ui;
 
 fn main() {
@@ -14,26 +15,28 @@ fn main() {
 
     app.run(move |app| {
         gpui_component::init(app);
-        app.set_global::<AppModel>(AppModel::new());
-        let bounds = Bounds::centered(None, size(px(800.), px(600.)), app);
+        ui::init(app);
 
+        let bounds = Bounds::centered(None, size(px(800.), px(600.)), app);
         app.spawn(async move |cx| {
-            cx.open_window(WindowOptions{
-                titlebar: Some(TitlebarOptions { title: Some("GrAMF".into()), appears_transparent: false, traffic_light_position: None }),
-                window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
-                ..Default::default()
-            }, |window, cx| {
-                let view = cx.new(|cx| ui::root_view::RootView::new(cx));
-                cx.new(|cx| Root::new(view, window, cx))
-            })
+            cx.open_window(
+                WindowOptions {
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("GrAMF".into()),
+                        appears_transparent: true,
+                        traffic_light_position: None,
+                    }),
+                    window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    let view = cx.new(|cx| ui::root_view::RootView::new(cx));
+                    cx.new(|cx| Root::new(view, window, cx))
+                },
+            )
             .unwrap();
             // cx.activate(true);
         })
         .detach();
-
-        app.activate(true);
-        app.on_window_closed(|cx, _| {
-            cx.quit();
-        }).detach();
     });
 }

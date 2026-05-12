@@ -1,17 +1,20 @@
-use gpui::{App, Context, FocusHandle, IntoElement, ParentElement, Render, Styled, div, rgb};
+use gpui::{App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, Styled, div, rgb};
+use gpui_component::menu::AppMenuBar;
 
-use crate::app::gpui_app::AppModel;
+use crate::{app::gpui_app::AppModel, ui::title_bar::{self, init_app_menu}};
 
 use super::menu_bar;
 
 pub struct RootView {
     focus_handle: FocusHandle,
+    app_menu_bar: Entity<AppMenuBar>,
 }
 
 impl RootView {
     pub fn new(cx: &mut App) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
+            app_menu_bar: AppMenuBar::new(cx),
         }
     }
 }
@@ -25,15 +28,18 @@ impl gpui::Focusable for RootView {
 impl Render for RootView {
     fn render(
         &mut self,
-        window: &mut gpui::Window,
+        _window: &mut gpui::Window,
         cx: &mut Context<'_, Self>,
     ) -> impl IntoElement {
         let app = cx.global::<AppModel>();
+        let app_menu_bar = init_app_menu("GrAMF", cx);
 
         div()
+            .child(
+                title_bar::title_bar(cx, app_menu_bar)
+            )
             .flex()
             .size_full()
-            .child(menu_bar::menu_bar(cx))
             .bg(rgb(0x1a1a1a))
             .child(
                 div()
