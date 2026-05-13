@@ -3,6 +3,7 @@ use crate::{
     vertex::{UniformBuffer, Vertex},
 };
 
+/// A struct representing the 3D scene, including its model matrix, vertex/index buffers, uniform bindings, and render pipeline.
 pub struct Scene {
     pub model: nalgebra_glm::Mat4,
     pub vertex_buffer: wgpu::Buffer,
@@ -12,6 +13,7 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// Creates a new `Scene` instance, initializing the vertex/index buffers, uniform bindings, and render pipeline.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let vertex_buffer = wgpu::util::DeviceExt::create_buffer_init(
             device,
@@ -40,6 +42,7 @@ impl Scene {
         }
     }
 
+    /// Renders the scene using the provided render pass, setting the pipeline, bind groups, and vertex/index buffers.
     pub fn render<'rpass>(&'rpass self, renderpass: &mut wgpu::RenderPass<'rpass>) {
         renderpass.set_pipeline(&self.pipeline);
         renderpass.set_bind_group(0, &self.uniform.bind_group, &[]);
@@ -50,6 +53,7 @@ impl Scene {
         renderpass.draw_indexed(0..(crate::constants::INDICES.len() as _), 0, 0..1);
     }
 
+    /// Updates the scene's model matrix and uniform buffer based on the aspect ratio and delta time.
     pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, delta_time: f32) {
         let projection =
             nalgebra_glm::perspective_lh_zo(aspect_ratio, 80_f32.to_radians(), 0.1, 1000.0);
@@ -72,11 +76,13 @@ impl Scene {
         );
     }
 
+    /// Creates a render pipeline for the scene using the provided device, surface format, and uniform bindings.
     fn create_pipeline(
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
         uniform: &UniformBinding,
     ) -> wgpu::RenderPipeline {
+        // Create the shader module from the WGSL source code
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
@@ -84,12 +90,14 @@ impl Scene {
             )),
         });
 
+        // Create the pipeline layout, specifying the bind group layout for the uniform buffer
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[Some(&uniform.bind_group_layout)],
             immediate_size: 0,
         });
 
+        // Create the render pipeline, specifying the vertex and fragment stages, primitive state, depth/stencil state, and multisampling
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),

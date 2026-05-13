@@ -1,6 +1,7 @@
 use crate::vertex::UniformBuffer;
 use wgpu::util::DeviceExt;
 
+/// A helper struct to manage uniform buffers and their associated bind groups.
 pub struct UniformBinding {
     pub buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,

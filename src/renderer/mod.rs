@@ -147,8 +147,11 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+
+            // Render the 3D scene
             self.scene.render(&mut render_pass);
 
+            // Render the egui UI on top of the 3D scene
             self.egui_renderer.render(
                 &mut render_pass.forget_lifetime(),
                 &paint_jobs,
