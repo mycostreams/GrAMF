@@ -21,8 +21,8 @@ impl Vertex {
     }
 }
 
-#[repr(C)]
-#[derive(Default, Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct UniformBuffer {
-    pub mvp: nalgebra_glm::Mat4,
-}
+// #[repr(C)]
+// #[derive(Default, Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+// pub struct UniformBuffer {
+//     pub mvp: nalgebra_glm::Mat4,
+// }

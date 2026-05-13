@@ -1,18 +1,22 @@
+use cgmath::{Deg, Matrix3, Point3, Rotation, Rotation3, Vector3};
+
 use crate::{
-    uniform_binding::UniformBinding,
-    vertex::{UniformBuffer, Vertex},
+    // uniform_binding::CameraUniformBinding,
+    renderer::camera::{self, Camera, CameraUniform, CameraUniformBinding},
+    vertex::Vertex,
 };
 
 /// A struct representing the 3D scene, including its model matrix, vertex/index buffers, uniform bindings, and render pipeline.
-pub struct GraphScene {
-    pub model: nalgebra_glm::Mat4,
+pub struct GraphRenderer {
+    pub camera: Camera,
+    pub camera_raw: CameraUniform,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
-    pub uniform: UniformBinding,
+    pub uniform: CameraUniformBinding,
     pub pipeline: wgpu::RenderPipeline,
 }
 
-impl GraphScene {
+impl GraphRenderer {
     /// Creates a new `GraphScene` instance, initializing the vertex/index buffers, uniform bindings, and render pipeline.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let vertex_buffer = wgpu::util::DeviceExt::create_buffer_init(
@@ -31,10 +35,17 @@ impl GraphScene {
                 usage: wgpu::BufferUsages::INDEX,
             },
         );
-        let uniform = UniformBinding::new(device);
+        let camera = Camera {
+            position: cgmath::Point3::new(0.0, 0.0, 3.0),
+            target: cgmath::Point3::new(0.0, 0.0, 0.0),
+            up: cgmath::Vector3::new(0.0, 1.0, 0.0),
+        };
+        let camera_raw = CameraUniform::from_camera(&camera, 1.0);
+        let uniform: CameraUniformBinding = CameraUniformBinding::new(device);
         let pipeline = Self::create_pipeline(device, surface_format, &uniform);
         Self {
-            model: nalgebra_glm::Mat4::identity(),
+            camera,
+            camera_raw,
             uniform,
             pipeline,
             vertex_buffer,
@@ -55,37 +66,29 @@ impl GraphScene {
 
     /// Updates the scene's model matrix and uniform buffer based on the aspect ratio and delta time.
     pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, delta_time: f32) {
-        let projection =
-            nalgebra_glm::perspective_lh_zo(aspect_ratio, 80_f32.to_radians(), 0.1, 1000.0);
-        let view = nalgebra_glm::look_at_lh(
-            &nalgebra_glm::vec3(0.0, 0.0, 3.0),
-            &nalgebra_glm::vec3(0.0, 0.0, 0.0),
-            &nalgebra_glm::Vec3::y(),
+        let rotation = cgmath::Quaternion::<f32>::from_axis_angle(
+            Vector3 { x: 0.0, y: 1.0, z: 0.0 },
+            Deg(30_f32 * delta_time),
         );
-        self.model = nalgebra_glm::rotate(
-            &self.model,
-            30_f32.to_radians() * delta_time,
-            &nalgebra_glm::Vec3::y(),
-        );
-        self.uniform.update_buffer(
-            queue,
-            0,
-            UniformBuffer {
-                mvp: projection * view * self.model,
-            },
-        );
+        self.camera.position = rotation.rotate_point(self.camera.position);
+        self.camera_raw.update_view_proj(&self.camera, aspect_ratio);
+        self.uniform.update_buffer(queue, 0, self.camera_raw);
+
+        println!("Camera position: {:?}", self.camera.position);
+        println!("Camera target: {:?}", self.camera.target);
+        println!("Camera up: {:?}", self.camera.up);
     }
 
     /// Creates a render pipeline for the scene using the provided device, surface format, and uniform bindings.
     fn create_pipeline(
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
-        uniform: &UniformBinding,
+        uniform: &CameraUniformBinding,
     ) -> wgpu::RenderPipeline {
         // Create the shader module from the WGSL source code
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(include_str!("triangle_shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader/triangle_shader.wgsl").into()),
         });
 
         // Create the pipeline layout, specifying the bind group layout for the uniform buffer

@@ -1,5 +1,5 @@
-pub(crate) mod graph_scene;
-
+mod graph_renderer;
+mod camera;
 use crate::{gpu::Gpu};
 use egui_wgpu::{Renderer as EguiRenderer, ScreenDescriptor, wgpu};
 use web_time::Duration;
@@ -9,7 +9,7 @@ pub struct Renderer {
     gpu: Gpu,
     depth_texture_view: wgpu::TextureView,
     egui_renderer: EguiRenderer,
-    scene: graph_scene::GraphScene,
+    scene: graph_renderer::GraphRenderer,
 }
 
 impl Renderer {
@@ -34,7 +34,7 @@ impl Renderer {
             },
         );
 
-        let scene = graph_scene::GraphScene::new(&gpu.device, gpu.surface_format);
+        let scene = graph_renderer::GraphRenderer::new(&gpu.device, gpu.surface_format);
 
         Self {
             gpu,
