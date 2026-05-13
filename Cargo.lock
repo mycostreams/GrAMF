@@ -7,6 +7,7 @@ name = "GrAMF"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cgmath",
  "egui",
  "egui-wgpu",
  "egui-winit",
@@ -161,6 +162,15 @@ dependencies = [
  "anstyle",
  "once_cell_polyfill",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "approx"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f2a05fd1bd10b2527e20a2cd32d8873d115b8b39fe219ee25f42a8aca6ba278"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -388,6 +398,16 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "cgmath"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a98d30140e3296250832bbaaff83b27dcd6fa3cc70fb6f1f3e5c9c0023b5317"
+dependencies = [
+ "approx 0.4.0",
+ "num-traits",
+]
 
 [[package]]
 name = "clipboard-win"
@@ -1589,7 +1609,7 @@ version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df76ea0ff5c7e6b88689085804d6132ded0ddb9de5ca5b8aeb9eeadc0508a70a"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "bytemuck",
  "glam 0.14.0",
  "glam 0.15.2",
@@ -1624,7 +1644,7 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784a598b961eafe0f3329861482ebdb73ecdcc02f771192783c099dd3b438461"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "nalgebra",
  "num-traits",
  "simba",
@@ -2546,7 +2566,7 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c99284beb21666094ba2b75bbceda012e610f5479dfcc2d6e2426f53197ffd95"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "num-complex",
  "num-traits",
  "paste",
