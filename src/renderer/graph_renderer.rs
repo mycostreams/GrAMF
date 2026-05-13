@@ -1,8 +1,8 @@
-use cgmath::{Deg, Matrix3, Point3, Rotation, Rotation3, Vector3};
+use cgmath::{Deg, Rotation, Rotation3, Vector3};
 
 use crate::{
     // uniform_binding::CameraUniformBinding,
-    renderer::camera::{self, Camera, CameraUniform, CameraUniformBinding},
+    renderer::camera::{Camera, CameraUniform, CameraUniformBinding},
     vertex::Vertex,
 };
 
