@@ -4,7 +4,7 @@ use crate::{
 };
 
 /// A struct representing the 3D scene, including its model matrix, vertex/index buffers, uniform bindings, and render pipeline.
-pub struct Scene {
+pub struct GraphScene {
     pub model: nalgebra_glm::Mat4,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
@@ -12,8 +12,8 @@ pub struct Scene {
     pub pipeline: wgpu::RenderPipeline,
 }
 
-impl Scene {
-    /// Creates a new `Scene` instance, initializing the vertex/index buffers, uniform bindings, and render pipeline.
+impl GraphScene {
+    /// Creates a new `GraphScene` instance, initializing the vertex/index buffers, uniform bindings, and render pipeline.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let vertex_buffer = wgpu::util::DeviceExt::create_buffer_init(
             device,
@@ -85,9 +85,7 @@ impl Scene {
         // Create the shader module from the WGSL source code
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
-                crate::constants::SHADER_SOURCE,
-            )),
+            source: wgpu::ShaderSource::Wgsl(include_str!("triangle_shader.wgsl").into()),
         });
 
         // Create the pipeline layout, specifying the bind group layout for the uniform buffer

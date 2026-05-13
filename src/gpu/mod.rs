@@ -9,16 +9,19 @@ pub struct Gpu {
 }
 
 impl Gpu {
+    // Calculate the aspect ratio based on the current surface configuration
     pub fn aspect_ratio(&self) -> f32 {
         self.surface_config.width as f32 / self.surface_config.height.max(1) as f32
     }
 
+    // Resize the surface configuration and reconfigure the surface when the window size changes
     pub fn resize(&mut self, width: u32, height: u32) {
         self.surface_config.width = width;
         self.surface_config.height = height;
         self.surface.configure(&self.device, &self.surface_config);
     }
 
+    // Create a depth texture for use in rendering, with the specified width and height
     pub fn create_depth_texture(&self, width: u32, height: u32) -> wgpu::TextureView {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Texture"),
@@ -48,6 +51,7 @@ impl Gpu {
         })
     }
 
+    // Asynchronously create a new Gpu instance with a surface for rendering, given a window and its dimensions
     pub async fn new_async(
         window: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
@@ -112,6 +116,7 @@ impl Gpu {
         }
     }
 
+    // Asynchronously create a new Gpu instance without a surface, for headless rendering or compute tasks
     pub async fn new_async_headless() -> Self {
         let instance =
             wgpu::Instance::new(InstanceDescriptor::new_without_display_handle_from_env());

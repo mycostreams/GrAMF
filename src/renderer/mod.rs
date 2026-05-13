@@ -1,17 +1,21 @@
-use crate::{gpu::Gpu, scene::Scene};
+pub(crate) mod graph_scene;
+
+use crate::{gpu::Gpu};
 use egui_wgpu::{Renderer as EguiRenderer, ScreenDescriptor, wgpu};
 use web_time::Duration;
 
+/// The `Renderer` struct is responsible for managing the GPU, depth texture, egui renderer, and 3D scene. It handles rendering frames, resizing, and updating the scene based on time and aspect ratio.
 pub struct Renderer {
     gpu: Gpu,
     depth_texture_view: wgpu::TextureView,
     egui_renderer: EguiRenderer,
-    scene: Scene,
+    scene: graph_scene::GraphScene,
 }
 
 impl Renderer {
     const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+    /// Asynchronously creates a new `Renderer` instance by initializing the GPU, depth texture, egui renderer, and 3D scene based on the provided window and dimensions.
     pub async fn new(
         window: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
@@ -30,7 +34,7 @@ impl Renderer {
             },
         );
 
-        let scene = Scene::new(&gpu.device, gpu.surface_format);
+        let scene = graph_scene::GraphScene::new(&gpu.device, gpu.surface_format);
 
         Self {
             gpu,
@@ -40,11 +44,13 @@ impl Renderer {
         }
     }
 
+    /// Resizes the renderer by updating the GPU's surface configuration and recreating the depth texture with the new dimensions.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
         self.depth_texture_view = self.gpu.create_depth_texture(width, height);
     }
 
+    /// Renders a frame by updating the scene based on the delta time, processing egui textures and paint jobs, acquiring the current surface texture, and executing the render pass to draw both the 3D scene and the egui UI.
     pub fn render_frame(
         &mut self,
         screen_descriptor: ScreenDescriptor,
@@ -73,6 +79,7 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
+        // Update the egui renderer's buffers with the current paint jobs and screen descriptor before rendering
         self.egui_renderer.update_buffers(
             &self.gpu.device,
             &self.gpu.queue,
@@ -81,6 +88,7 @@ impl Renderer {
             &screen_descriptor,
         );
 
+        // Acquire the current surface texture for rendering, handling potential errors such as outdated or occluded surfaces by reconfiguring or returning early as needed
         let surface_texture = match self.gpu.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -101,6 +109,7 @@ impl Renderer {
             other => panic!("Failed to get surface texture: {other:?}"),
         };
 
+        // Create a texture view from the acquired surface texture to be used as the render target for the render pass
         let surface_texture_view =
             surface_texture
                 .texture
@@ -118,9 +127,11 @@ impl Renderer {
 
         encoder.insert_debug_marker("Render scene");
 
+        // Begin a render pass with the surface texture view as the color attachment and the depth texture view as the depth attachment, clearing both at the start of the pass. Then render the 3D scene followed by the egui UI using the respective renderers.
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
+                // Set up the color attachment to render to the surface texture, clearing it with a specified color at the start of the pass
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &surface_texture_view,
                     resolve_target: None,
@@ -135,6 +146,7 @@ impl Renderer {
                     },
                     depth_slice: None,
                 })],
+                // Set up the depth attachment to use the depth texture view, clearing it to a default depth value at the start of the pass
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_texture_view,
                     depth_ops: Some(wgpu::Operations {

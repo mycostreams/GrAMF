@@ -85,6 +85,7 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Ensure that the GUI state, renderer, window, and last render time are all available before processing the event
         let (Some(gui_state), Some(renderer), Some(window), Some(last_render_time)) = (
             self.gui_state.as_mut(),
             self.renderer.as_mut(),
@@ -94,10 +95,12 @@ impl ApplicationHandler for App {
             return;
         };
 
+        // Pass the event to the GUI state for handling, and if it was consumed, return early
         if gui_state.on_window_event(window, &event).consumed {
             return;
         }
 
+        // Handle specific window events such as keyboard input, resizing, and redraw requests
         match event {
             WindowEvent::KeyboardInput {
                 event:
@@ -170,6 +173,7 @@ impl ApplicationHandler for App {
             _ => (),
         }
 
+        // Request a redraw of the window after processing the event to ensure that the UI is updated
         window.request_redraw();
     }
 }
