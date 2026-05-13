@@ -1,21 +1,13 @@
-mod app;
-mod render;
+// mod app;
+// mod render;
 
-use winit::event_loop::{ControlFlow, EventLoop};
+use GrAMF::App;
+// use winit::event_loop::{ControlFlow, EventLoop};
 
-fn main() {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        pollster::block_on(run());
-    }
-}
-
-async fn run() {
-    let event_loop = EventLoop::new().unwrap();
-
-    event_loop.set_control_flow(ControlFlow::Poll);
-
-    let mut app = app::app_model::App::new();
-
-    event_loop.run_app(&mut app).expect("Failed to run app");
+fn main()  -> Result<(), Box<dyn std::error::Error>>{
+        let event_loop = winit::event_loop::EventLoop::builder().build()?;
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        let mut application = App::default();
+        event_loop.run_app(&mut application)?;
+    Ok(())
 }
