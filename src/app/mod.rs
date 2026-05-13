@@ -1,0 +1,224 @@
+use crate::renderer::Renderer;
+use egui_winit::State;
+use std::sync::Arc;
+use web_time::Instant;
+use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
+use winit::event::{KeyEvent, WindowEvent};
+use winit::event_loop::ActiveEventLoop;
+use winit::window::{Theme, Window, WindowId};
+
+#[derive(Default)]
+pub struct App {
+    window: Option<Arc<Window>>,
+    renderer: Option<Renderer>,
+    gui_state: Option<State>,
+    last_render_time: Option<Instant>,
+    last_size: (u32, u32),
+    initialized: bool,
+}
+
+impl ApplicationHandler for App {
+    fn suspended(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.renderer = None;
+        self.window = None;
+    }
+
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+
+        let mut attributes = Window::default_attributes();
+
+        attributes = attributes.with_title("Standalone Winit/Wgpu Example");
+
+        let Ok(window) = event_loop.create_window(attributes) else {
+            return;
+        };
+
+        let window_handle = Arc::new(window);
+        self.window = Some(window_handle.clone());
+
+        let gui_context = egui::Context::default();
+
+        let inner_size = window_handle.inner_size();
+        self.last_size = (inner_size.width, inner_size.height);
+
+        let viewport_id = gui_context.viewport_id();
+        let gui_state = State::new(
+            gui_context,
+            viewport_id,
+            &window_handle,
+            Some(window_handle.scale_factor() as _),
+            Some(Theme::Dark),
+            None,
+        );
+
+        let (width, height) = (
+            window_handle.inner_size().width,
+            window_handle.inner_size().height,
+        );
+
+        if !self.initialized {
+            env_logger::init();
+        }
+        let renderer =
+            pollster::block_on(
+                async move { Renderer::new(window_handle.clone(), width, height).await },
+            );
+        self.renderer = Some(renderer);
+
+        self.gui_state = Some(gui_state);
+        self.last_render_time = Some(Instant::now());
+        self.initialized = true;
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        let (Some(gui_state), Some(renderer), Some(window), Some(last_render_time)) = (
+            self.gui_state.as_mut(),
+            self.renderer.as_mut(),
+            self.window.as_ref(),
+            self.last_render_time.as_mut(),
+        ) else {
+            return;
+        };
+
+        if gui_state.on_window_event(window, &event).consumed {
+            return;
+        }
+
+        match event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: winit::keyboard::PhysicalKey::Code(key_code),
+                        ..
+                    },
+                ..
+            } => {
+                if matches!(key_code, winit::keyboard::KeyCode::Escape) {
+                    event_loop.exit();
+                }
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                let scale_factor = window.scale_factor() as f32;
+                gui_state.egui_ctx().set_pixels_per_point(scale_factor);
+            }
+            WindowEvent::Resized(PhysicalSize { width, height }) => {
+                if width == 0 || height == 0 {
+                    return;
+                }
+
+                log::info!("Resizing renderer surface to: ({width}, {height})");
+                renderer.resize(width, height);
+                self.last_size = (width, height);
+
+                let scale_factor = window.scale_factor() as f32;
+                gui_state.egui_ctx().set_pixels_per_point(scale_factor);
+            }
+            WindowEvent::CloseRequested => {
+                log::info!("Close requested. Exiting...");
+                event_loop.exit();
+            }
+            WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let delta_time = now - *last_render_time;
+                *last_render_time = now;
+
+                let gui_input = gui_state.take_egui_input(window);
+
+                let title = "Rust/Wgpu";
+
+                let egui_winit::egui::FullOutput {
+                    textures_delta,
+                    shapes,
+                    pixels_per_point,
+                    platform_output,
+                    ..
+                } = gui_state.egui_ctx().run_ui(gui_input, |ui| {
+                    egui::Panel::top("top").show_inside(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            egui::MenuBar::new().ui(ui, |ui| {
+                                ui.menu_button("File", |ui| {
+                                    if ui.button("Load").clicked() {
+                                        ui.close();
+                                    }
+                                    if ui.button("Save").clicked() {
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    if ui.button("Import").clicked() {
+                                        ui.close();
+                                    }
+                                });
+
+                                ui.menu_button("Edit", |ui| {
+                                    if ui.button("Clear").clicked() {
+                                        ui.close();
+                                    }
+                                    if ui.button("Reset").clicked() {
+                                        ui.close();
+                                    }
+                                });
+
+                                ui.separator();
+
+                                ui.label(
+                                    egui::RichText::new(title).color(egui::Color32::LIGHT_GREEN),
+                                );
+
+                                ui.separator();
+                            });
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+                                ui.add_space(10.0);
+                                ui.label(
+                                    egui::RichText::new("v0.1.0").color(egui::Color32::ORANGE),
+                                );
+                                ui.separator();
+                            });
+                        });
+                    });
+
+                    egui::Panel::left("left").show_inside(ui, |ui| {
+                        ui.heading("Scene Tree");
+                    });
+
+                    egui::Panel::right("right").show_inside(ui, |ui| {
+                        ui.heading("Inspector");
+                    });
+
+                    egui::Panel::bottom("Console").show_inside(ui, |ui| {
+                        ui.heading("Console");
+                    });
+                });
+
+                gui_state.handle_platform_output(window, platform_output);
+
+                let paint_jobs = gui_state.egui_ctx().tessellate(shapes, pixels_per_point);
+
+                let screen_descriptor = {
+                    let (width, height) = self.last_size;
+                    if width == 0 || height == 0 {
+                        return;
+                    }
+                    egui_wgpu::ScreenDescriptor {
+                        size_in_pixels: [width, height],
+                        pixels_per_point,
+                    }
+                };
+
+                renderer.render_frame(screen_descriptor, paint_jobs, textures_delta, delta_time);
+            }
+            _ => (),
+        }
+
+        window.request_redraw();
+    }
+}

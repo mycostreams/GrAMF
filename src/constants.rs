@@ -1,4 +1,4 @@
-use crate::Vertex;
+use crate::vertex::Vertex;
 
 pub const VERTICES: [Vertex; 3] = [
     Vertex {
