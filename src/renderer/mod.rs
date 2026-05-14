@@ -3,19 +3,20 @@ mod camera;
 use crate::{gpu::Gpu};
 use egui_wgpu::{Renderer as EguiRenderer, ScreenDescriptor, wgpu};
 use web_time::Duration;
+use graph_renderer::GraphRenderer;
 
-/// The `Renderer` struct is responsible for managing the GPU, depth texture, egui renderer, and 3D scene. It handles rendering frames, resizing, and updating the scene based on time and aspect ratio.
-pub struct Renderer {
+/// The `AppRenderer` struct is responsible for managing the GPU, depth texture, egui renderer, and 3D scene. It handles rendering frames, resizing, and updating the scene based on time and aspect ratio.
+pub struct AppRenderer {
     gpu: Gpu,
     depth_texture_view: wgpu::TextureView,
     egui_renderer: EguiRenderer,
-    scene: graph_renderer::GraphRenderer,
+    scene: GraphRenderer,
 }
 
-impl Renderer {
+impl AppRenderer {
     const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    /// Asynchronously creates a new `Renderer` instance by initializing the GPU, depth texture, egui renderer, and 3D scene based on the provided window and dimensions.
+    /// Asynchronously creates a new `AppRenderer` instance by initializing the GPU, depth texture, egui renderer, and 3D scene based on the provided window and dimensions.
     pub async fn new(
         window: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
@@ -34,7 +35,7 @@ impl Renderer {
             },
         );
 
-        let scene = graph_renderer::GraphRenderer::new(&gpu.device, gpu.surface_format);
+        let scene = GraphRenderer::new(&gpu.device, gpu.surface_format);
 
         Self {
             gpu,

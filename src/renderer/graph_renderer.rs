@@ -23,7 +23,7 @@ impl GraphRenderer {
             device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(&crate::constants::VERTICES),
+                contents: bytemuck::cast_slice(&crate::constants::EDGE_VERTS),
                 usage: wgpu::BufferUsages::VERTEX,
             },
         );
@@ -31,15 +31,11 @@ impl GraphRenderer {
             device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(&crate::constants::INDICES),
+                contents: bytemuck::cast_slice(&crate::constants::EDGE_INDICES),
                 usage: wgpu::BufferUsages::INDEX,
             },
         );
-        let camera = Camera {
-            position: cgmath::Point3::new(0.0, 0.0, 3.0),
-            target: cgmath::Point3::new(0.0, 0.0, 0.0),
-            up: cgmath::Vector3::new(0.0, 1.0, 0.0),
-        };
+        let camera = Camera::default();
         let camera_raw = CameraUniform::from_camera(&camera, 1.0);
         let uniform: CameraUniformBinding = CameraUniformBinding::new(device);
         let pipeline = Self::create_pipeline(device, surface_format, &uniform);
@@ -61,13 +57,17 @@ impl GraphRenderer {
         renderpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         renderpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-        renderpass.draw_indexed(0..(crate::constants::INDICES.len() as _), 0, 0..1);
+        renderpass.draw_indexed(0..(crate::constants::EDGE_INDICES.len() as _), 0, 0..1);
     }
 
     /// Updates the scene's model matrix and uniform buffer based on the aspect ratio and delta time.
     pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, delta_time: f32) {
         let rotation = cgmath::Quaternion::<f32>::from_axis_angle(
-            Vector3 { x: 0.0, y: 1.0, z: 0.0 },
+            Vector3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
             Deg(30_f32 * delta_time),
         );
         self.camera.position = rotation.rotate_point(self.camera.position);

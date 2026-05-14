@@ -1,6 +1,6 @@
 mod ui;
 
-use crate::renderer::Renderer;
+use crate::renderer::AppRenderer;
 use egui_winit::State;
 use std::sync::Arc;
 use web_time::Instant;
@@ -13,7 +13,7 @@ use winit::window::{Theme, Window, WindowId};
 #[derive(Default)]
 pub struct App {
     window: Option<Arc<Window>>,
-    renderer: Option<Renderer>,
+    renderer: Option<AppRenderer>,
     gui_state: Option<State>,
     last_render_time: Option<Instant>,
     last_size: (u32, u32),
@@ -69,7 +69,7 @@ impl ApplicationHandler for App {
         }
         let renderer =
             pollster::block_on(
-                async move { Renderer::new(window_handle.clone(), width, height).await },
+                async move { AppRenderer::new(window_handle.clone(), width, height).await },
             );
         self.renderer = Some(renderer);
 
@@ -135,28 +135,37 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
+                // Get time delta sice last draw
                 let now = Instant::now();
                 let delta_time = now - *last_render_time;
                 *last_render_time = now;
 
+                //take gui input
                 let gui_input = gui_state.take_egui_input(window);
 
+                //TODO: move this title to a constant or config file
                 let title = "GrAMF - Graphs for Arbuscular Mycorrhizal Fungi";
 
+                // Build the egui UI
                 let egui_winit::egui::FullOutput {
+                    //textures_delta is used to track changes to textures that egui uses (e.g., for images in the UI). It contains information about which textures were added, changed, or removed during this frame.
                     textures_delta,
                     shapes,
                     pixels_per_point,
                     platform_output,
                     ..
                 } = gui_state.egui_ctx().run_ui(gui_input, |ui| {
+                    // Build the UI using the `build_ui` function defined in the `ui` module
                     ui::build_ui(ui, title);
                 });
 
+                // Handle any platform output from egui (e.g., opening URLs, copying to clipboard, etc.)
                 gui_state.handle_platform_output(window, platform_output);
 
+                // Tessellate the egui shapes into paint jobs that can be rendered by the renderer
                 let paint_jobs = gui_state.egui_ctx().tessellate(shapes, pixels_per_point);
 
+                // Get descriptor for current screen
                 let screen_descriptor = {
                     let (width, height) = self.last_size;
                     if width == 0 || height == 0 {
@@ -168,6 +177,14 @@ impl ApplicationHandler for App {
                     }
                 };
 
+                // Render frame
+                /*
+                Screen descriptor has width, height and dpi for all renderers to use
+                Paint jobs and textures delta are used to render the egui UI
+                delta_time is used to update the scene based on time (e.g., for animations)
+
+                This function will render the graph scene, then the EGUI ui                
+                 */
                 renderer.render_frame(screen_descriptor, paint_jobs, textures_delta, delta_time);
             }
             _ => (),

@@ -9,7 +9,7 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
 );
 
 
-
+#[derive(Debug, Clone)]
 pub struct Camera {
     pub(crate) position: Point3<f32>,
     pub(crate) target: Point3<f32>,
@@ -17,6 +17,21 @@ pub struct Camera {
 }   
 
 impl Camera {
+    pub fn default() -> Self {
+        Self {
+            position: Point3::new(0.0, 0.0, 3.0),
+            target: Point3::new(0.0, 0.0, 0.0),
+            up: cgmath::Vector3::new(0.0, 1.0, 0.0),
+        }
+    }
+    pub fn new(position: Point3<f32>, target: Point3<f32>, up: cgmath::Vector3<f32>) -> Self {
+        Self {
+            position,
+            target,
+            up,
+        }
+    }
+
     pub fn ortho_view_matrix(&self, aspect_ratio: f32) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.position, self.target, self.up);
         let proj = cgmath::ortho(-1.0 * aspect_ratio, 1.0 * aspect_ratio    , -1.0, 1.0, -1.0, 100.0);
