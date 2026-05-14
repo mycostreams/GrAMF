@@ -1,6 +1,7 @@
 mod graph_renderer;
 mod camera;
-use crate::{gpu::Gpu};
+mod gpu;
+use crate::renderer::gpu::Gpu;
 use egui_wgpu::{Renderer as EguiRenderer, ScreenDescriptor, wgpu};
 use web_time::Duration;
 use graph_renderer::GraphRenderer;
@@ -10,7 +11,7 @@ pub struct AppRenderer {
     gpu: Gpu,
     depth_texture_view: wgpu::TextureView,
     egui_renderer: EguiRenderer,
-    scene: GraphRenderer,
+    graph_renderer: GraphRenderer,
 }
 
 impl AppRenderer {
@@ -35,13 +36,13 @@ impl AppRenderer {
             },
         );
 
-        let scene = GraphRenderer::new(&gpu.device, gpu.surface_format);
+        let graph_renderer = GraphRenderer::new(&gpu.device, gpu.surface_format);
 
         Self {
             gpu,
             depth_texture_view,
             egui_renderer,
-            scene,
+            graph_renderer,
         }
     }
 
@@ -61,7 +62,7 @@ impl AppRenderer {
     ) {
         let delta_time = delta_time.as_secs_f32();
 
-        self.scene
+        self.graph_renderer
             .update(&self.gpu.queue, self.gpu.aspect_ratio(), delta_time);
 
         for (id, image_delta) in &textures_delta.set {
@@ -162,7 +163,7 @@ impl AppRenderer {
             });
 
             // Render the 3D scene
-            self.scene.render(&mut render_pass);
+            self.graph_renderer.render(&mut render_pass);
 
             // Render the egui UI on top of the 3D scene
             self.egui_renderer.render(

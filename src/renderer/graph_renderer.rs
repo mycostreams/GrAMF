@@ -3,7 +3,7 @@ use cgmath::{Deg, Rotation, Rotation3, Vector3};
 use crate::{
     // uniform_binding::CameraUniformBinding,
     renderer::camera::{Camera, CameraUniform, CameraUniformBinding},
-    vertex::Vertex,
+    vertex::{Vertex, data::{EDGE_VERTS, EDGE_INDICES}},
 };
 
 /// A struct representing the 3D scene, including its model matrix, vertex/index buffers, uniform bindings, and render pipeline.
@@ -23,7 +23,7 @@ impl GraphRenderer {
             device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(&crate::constants::EDGE_VERTS),
+                contents: bytemuck::cast_slice(&EDGE_VERTS),
                 usage: wgpu::BufferUsages::VERTEX,
             },
         );
@@ -31,7 +31,7 @@ impl GraphRenderer {
             device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(&crate::constants::EDGE_INDICES),
+                contents: bytemuck::cast_slice(&EDGE_INDICES),
                 usage: wgpu::BufferUsages::INDEX,
             },
         );
@@ -57,7 +57,7 @@ impl GraphRenderer {
         renderpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         renderpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-        renderpass.draw_indexed(0..(crate::constants::EDGE_INDICES.len() as _), 0, 0..1);
+        renderpass.draw_indexed(0..(EDGE_INDICES.len() as _), 0, 0..1);
     }
 
     /// Updates the scene's model matrix and uniform buffer based on the aspect ratio and delta time.

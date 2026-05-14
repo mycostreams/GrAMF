@@ -115,7 +115,7 @@ impl Gpu {
             surface_format,
         }
     }
-
+    
     // Asynchronously create a new Gpu instance without a surface, for headless rendering or compute tasks
     pub async fn new_async_headless() -> Self {
         let instance =
