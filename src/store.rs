@@ -49,6 +49,10 @@ pub struct Store {
     pub node_t: Vec<f32>,
     /// Per hyperedge: id, label anchor (middle of its longest edge) and first appearance.
     pub hyperedge_anchors: Vec<(i64, [f32; 2], f32)>,
+    /// Root attr `backbone_fingerprint`; annotation files record it to detect staleness.
+    pub fingerprint: String,
+    /// `/root_nodes` written by the old registrator, offered for import into annotations.
+    pub root_nodes: Vec<i64>,
 }
 
 /// The `/edge_width_segments` columns GrAMF uses (HDF5 converts compound members by name).
@@ -179,6 +183,13 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         .map(|(h, (e, _, t))| (h, arcs.points[(arcs.offsets[e] + arcs.offsets[e + 1]) / 2], t))
         .collect();
 
+    let fingerprint = file
+        .attr("backbone_fingerprint")
+        .and_then(|a| a.read_scalar::<hdf5_metno::types::VarLenUnicode>())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let root_nodes = read_i64("root_nodes").unwrap_or_default();
+
     Ok(Store {
         arcs,
         vertex_t,
@@ -194,6 +205,8 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         width,
         node_t,
         hyperedge_anchors,
+        fingerprint,
+        root_nodes,
     })
 }
 
@@ -286,7 +299,7 @@ fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
 }
 
-fn segment_dist2(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+pub fn segment_dist2(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
     let ab = [b[0] - a[0], b[1] - a[1]];
     let len2 = ab[0] * ab[0] + ab[1] * ab[1];
     let s = if len2 > 0.0 {

@@ -1,6 +1,9 @@
+mod annotate;
 mod ui;
 
+use crate::annotations::{self, AddedEdge, Annotations, Op};
 use crate::colour::vertex_colours;
+use annotate::{AnnotationState, Pending, Tool};
 use crate::registry;
 use crate::renderer::AppRenderer;
 use crate::store::Store;
@@ -35,6 +38,13 @@ pub struct App {
     store: Option<Store>,
     selection: Option<ui::Selection>,
     layers: ui::Layers,
+    store_path: Option<PathBuf>,
+    annot: Option<AnnotationState>,
+    /// Waiting for the user to save or discard unsaved annotations before this happens.
+    confirm: Option<Pending>,
+    quit: bool,
+    /// Last window title set, to avoid resetting it every frame.
+    window_title: String,
 }
 
 /// Click tolerance and the most id labels drawn at once.
@@ -49,8 +59,16 @@ impl App {
         }
     }
 
+    fn dirty(&self) -> bool {
+        self.annot.as_ref().is_some_and(|a| a.own.dirty)
+    }
+
     fn open_store(&mut self, path: &Path) {
-        let (Some(renderer), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else {
+        if self.dirty() {
+            self.confirm = Some(Pending::Open(path.to_path_buf()));
+            return;
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
         let store = match crate::store::read_store(path) {
@@ -63,7 +81,6 @@ impl App {
         let n_timepoints = store.timepoints.len();
         renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, n_timepoints));
         self.selection = None;
-        window.set_title(&format!("GrAMF — {}", path.display()));
 
         let candidates = registry::plate_candidates(path);
         let plate = registry::default_dir().and_then(|dir| registry::lookup(&dir, &candidates));
@@ -82,7 +99,42 @@ impl App {
         )
         .map(ui::Timeline::new);
         renderer.time = self.timeline.as_ref().map_or(f32::MAX, |t| t.index as f32);
+
+        let (annot, errors) = load_annotations(path, &store, &annotate::load_author());
+        if !errors.is_empty() {
+            self.status = format!("{} · could not read {}", self.status, errors.join(", "));
+        }
+        self.annot = Some(annot);
+        self.store_path = Some(path.to_path_buf());
         self.store = Some(store);
+    }
+
+    fn save_annotations(&mut self) -> bool {
+        let Some(st) = self.annot.as_mut() else {
+            return false;
+        };
+        match annotations::save(&st.own, &st.own_path) {
+            Ok(()) => {
+                st.own.dirty = false;
+                self.status = format!("Saved {}", st.own_path.display());
+                true
+            }
+            Err(e) => {
+                self.status = format!("Could not save {}: {e}", st.own_path.display());
+                false
+            }
+        }
+    }
+
+    /// Carries out what waited on the unsaved-annotations prompt.
+    fn proceed(&mut self, pending: Pending) {
+        if let Some(st) = self.annot.as_mut() {
+            st.own.dirty = false; // saved or discarded by now
+        }
+        match pending {
+            Pending::Quit => self.quit = true,
+            Pending::Open(path) => self.pending_open = Some(path),
+        }
     }
 
     fn select(&mut self, selection: Option<ui::Selection>) {
@@ -94,23 +146,70 @@ impl App {
             Some(ui::Selection::Edge(e)) => vec![e],
             Some(ui::Selection::Node(n)) => store.incident_edges(n),
             Some(ui::Selection::Hyperedge(h)) => store.hyperedge_edges(h),
-            None => vec![],
+            Some(ui::Selection::Added(_)) | None => vec![], // the overlay highlights added edges
         };
         renderer.set_selection(store, &edges);
     }
 
-    /// Selects the node, else the edge, under window pixel `px`; empty space clears.
+    /// Acts on a click at window pixel `px` with the current tool.
     fn pick(&mut self, px: [f32; 2]) {
-        let (Some(renderer), Some(store)) = (self.renderer.as_ref(), self.store.as_ref()) else {
+        let (Some(renderer), Some(store), Some(st)) = (self.renderer.as_ref(), self.store.as_ref(), self.annot.as_mut())
+        else {
             return;
         };
         let at = renderer.screen_to_world(px);
         let radius = PICK_RADIUS_PX * renderer.um_per_px();
-        let picked = store
-            .pick_node(at, radius, renderer.time)
-            .map(ui::Selection::Node)
-            .or_else(|| store.pick_edge(at, radius, renderer.time).map(ui::Selection::Edge));
-        self.select(picked);
+        let t = renderer.time;
+        let node = || store.pick_node(at, radius, t);
+        let edge = || store.pick_edge(at, radius, t);
+
+        let mut op = None;
+        let selection = match st.tool {
+            Tool::Select => node()
+                .map(ui::Selection::Node)
+                .or_else(|| pick_added(store, st, at, radius).map(ui::Selection::Added))
+                .or_else(|| edge().map(ui::Selection::Edge)),
+            Tool::Exclude => edge().map(|e| {
+                op = Some(Op::SetExcluded(e, !st.own.excluded.contains(&e)));
+                ui::Selection::Edge(e)
+            }),
+            Tool::Root => node().map(|n| {
+                let id = store.node_ids[n];
+                op = Some(Op::SetRoot(id, !st.own.roots.contains(&id)));
+                ui::Selection::Node(n)
+            }),
+            Tool::Merge => edge().map(|e| match st.first.take() {
+                Some(dup) if dup != e => {
+                    op = Some(Op::SetDuplicateOf(dup, Some(e)));
+                    ui::Selection::Edge(dup)
+                }
+                _ => {
+                    st.first = Some(e);
+                    ui::Selection::Edge(e)
+                }
+            }),
+            Tool::AddEdge => node().map(|n| match st.first.take() {
+                Some(first) if first != n => {
+                    let added = AddedEdge {
+                        id: st.own.next_added_id(),
+                        u: store.node_ids[first],
+                        v: store.node_ids[n],
+                    };
+                    op = Some(Op::AddEdge(added));
+                    ui::Selection::Added(added.id)
+                }
+                _ => {
+                    st.first = Some(n);
+                    ui::Selection::Node(n)
+                }
+            }),
+        };
+        if let Some(op) = op {
+            st.own.edit(op);
+        }
+        if selection.is_some() || st.tool == Tool::Select {
+            self.select(selection);
+        }
     }
 
     fn apply(&mut self, actions: ui::UiActions) {
@@ -124,12 +223,77 @@ impl App {
         if actions.select.is_some() {
             self.select(actions.select);
         }
+        if let Some(st) = self.annot.as_mut() {
+            for op in actions.ops {
+                st.own.edit(op);
+            }
+            if actions.undo {
+                st.own.undo();
+            }
+            if actions.redo {
+                st.own.redo();
+            }
+        }
+        if actions.save {
+            self.save_annotations();
+        }
+        if let Some(name) = actions.switch_author {
+            if let (Some(path), Some(store)) = (self.store_path.as_ref(), self.store.as_ref()) {
+                annotate::save_author(&name);
+                let (annot, _) = load_annotations(path, store, &name);
+                self.annot = Some(annot);
+            }
+        }
+        if let Some(choice) = actions.choice {
+            if let Some(pending) = self.confirm.take() {
+                match choice {
+                    annotate::Choice::Save if self.save_annotations() => self.proceed(pending),
+                    annotate::Choice::Save => self.confirm = Some(pending), // save failed: ask again
+                    annotate::Choice::Discard => self.proceed(pending),
+                    annotate::Choice::Cancel => (),
+                }
+            }
+        }
         if actions.open {
             self.pending_open = rfd::FileDialog::new()
                 .add_filter("STG store", &["h5"])
                 .pick_file();
         }
     }
+}
+
+/// The user's own annotation file for the store at `path` (new if absent) and everyone
+/// else's beside it; returns the files that could not be read.
+fn load_annotations(path: &Path, store: &Store, author: &str) -> (AnnotationState, Vec<String>) {
+    let mut errors = vec![];
+    let own_path = annotations::path_for(path, author);
+    let own = if own_path.exists() {
+        annotations::load(&own_path).unwrap_or_else(|e| {
+            errors.push(e);
+            Annotations::new(author, &store.fingerprint)
+        })
+    } else {
+        Annotations::new(author, &store.fingerprint)
+    };
+    let others = annotations::list(path)
+        .into_iter()
+        .filter(|(a, _)| a != author)
+        .filter_map(|(_, p)| annotations::load(&p).map_err(|e| errors.push(e)).ok())
+        .collect();
+    (AnnotationState::new(author, own, own_path, others), errors)
+}
+
+/// Nearest added edge (own or a visible other author's) within `radius` µm.
+fn pick_added(store: &Store, st: &AnnotationState, at: [f32; 2], radius: f32) -> Option<i64> {
+    let pos = |id: &i64| store.node_index.get(id).map(|&n| store.node_pos[n]);
+    std::iter::once((&st.own, st.own_visible))
+        .chain(st.others.iter().map(|(a, v)| (a, *v)))
+        .filter(|(_, visible)| *visible)
+        .flat_map(|(a, _)| &a.added)
+        .filter_map(|e| Some((e.id, crate::store::segment_dist2(at, pos(&e.u)?, pos(&e.v)?))))
+        .filter(|&(_, d)| d <= radius * radius)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
 }
 
 /// Id labels inside the view for items that have appeared by the current time, in points;
@@ -255,6 +419,7 @@ impl ApplicationHandler for App {
         // Acted on after the event, once the borrows above are released
         let mut ui_actions = None;
         let mut click = None;
+        let mut escape = false;
 
         // Handle specific window events such as keyboard input, resizing, and redraw requests
         match event {
@@ -267,7 +432,7 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => match (key_code, state) {
-                (winit::keyboard::KeyCode::Escape, _) => event_loop.exit(),
+                (winit::keyboard::KeyCode::Escape, ElementState::Pressed) => escape = true,
                 (winit::keyboard::KeyCode::Home, ElementState::Pressed) => renderer.fit(),
                 (key, ElementState::Pressed) => {
                     if let Some(timeline) = self.timeline.as_mut() {
@@ -327,8 +492,11 @@ impl ApplicationHandler for App {
                 gui_state.egui_ctx().set_pixels_per_point(scale_factor);
             }
             WindowEvent::CloseRequested => {
-                log::info!("Close requested. Exiting...");
-                event_loop.exit();
+                if self.annot.as_ref().is_some_and(|a| a.own.dirty) {
+                    self.confirm = Some(Pending::Quit);
+                } else {
+                    event_loop.exit();
+                }
             }
             WindowEvent::RedrawRequested => {
                 // Get time delta sice last draw
@@ -345,6 +513,17 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .filter(|_| self.layers.node_ids || self.layers.hyperedge_ids)
                     .and_then(|store| id_labels(store, &self.layers, renderer, ppp));
+                let selected_added = match self.selection {
+                    Some(ui::Selection::Added(id)) => Some(id),
+                    _ => None,
+                };
+                let overlay = match (self.store.as_ref(), self.annot.as_ref()) {
+                    (Some(store), Some(st)) => annotate::overlay(store, st, renderer.time, selected_added, |p| {
+                        let [x, y] = renderer.world_to_screen(p);
+                        egui::pos2(x / ppp, y / ppp)
+                    }),
+                    _ => vec![],
+                };
                 if let Some(timeline) = self.timeline.as_mut() {
                     timeline.advance(delta_time.as_secs_f32());
                 }
@@ -372,6 +551,9 @@ impl ApplicationHandler for App {
                             store: self.store.as_ref(),
                             selection: self.selection,
                             labels: labels.as_deref(),
+                            annot: self.annot.as_mut(),
+                            overlay: &overlay,
+                            confirm: self.confirm.is_some(),
                         },
                     );
                 });
@@ -420,6 +602,12 @@ impl ApplicationHandler for App {
         // Request a redraw of the window after processing the event to ensure that the UI is updated
         window.request_redraw();
 
+        if escape {
+            let cancelled_step = self.annot.as_mut().and_then(|a| a.first.take()).is_some();
+            if !cancelled_step {
+                self.select(None);
+            }
+        }
         if let Some(px) = click {
             self.pick(px);
         }
@@ -428,6 +616,20 @@ impl ApplicationHandler for App {
         }
         if let Some(path) = self.pending_open.take() {
             self.open_store(&path);
+        }
+
+        let title = match (&self.store_path, self.dirty()) {
+            (Some(p), dirty) => format!("{}GrAMF — {}", if dirty { "• " } else { "" }, p.display()),
+            (None, _) => "GrAMF".into(),
+        };
+        if title != self.window_title {
+            if let Some(window) = self.window.as_ref() {
+                window.set_title(&title);
+            }
+            self.window_title = title;
+        }
+        if self.quit {
+            event_loop.exit();
         }
     }
 }

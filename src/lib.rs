@@ -1,3 +1,4 @@
+pub mod annotations;
 pub mod app;
 pub mod colour;
 pub mod renderer;

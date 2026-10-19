@@ -1,3 +1,5 @@
+use super::annotate::{self, AnnotationState, Choice};
+use crate::annotations::{Op, Target};
 use crate::colour::ColourBy;
 use crate::store::Store;
 use crate::time::{TimeAxis, TimeUnit};
@@ -69,6 +71,8 @@ pub enum Selection {
     Node(usize),
     /// Hyperedge id
     Hyperedge(i64),
+    /// Id of an edge added in an annotation file
+    Added(i64),
 }
 
 pub struct Layers {
@@ -97,6 +101,11 @@ pub struct FrameState<'a> {
     pub selection: Option<Selection>,
     /// Id labels, positioned in points; `None` when there are too many to show.
     pub labels: Option<&'a [(egui::Pos2, String)]>,
+    pub annot: Option<&'a mut AnnotationState>,
+    /// Annotation overlay, in points.
+    pub overlay: &'a [egui::Shape],
+    /// Ask what to do with unsaved annotations.
+    pub confirm: bool,
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -105,13 +114,39 @@ pub struct UiActions {
     pub open: bool,
     pub colour_changed: bool,
     pub select: Option<Selection>,
+    pub ops: Vec<Op>,
+    pub save: bool,
+    pub undo: bool,
+    pub redo: bool,
+    pub switch_author: Option<String>,
+    pub choice: Option<Choice>,
     /// Area left over between the panels, in points: where the map is drawn.
     pub map_rect: Option<egui::Rect>,
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels } = frame;
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm } = frame;
     let mut actions = UiActions::default();
+
+    // Shortcuts; single-letter tool keys only while no text field has focus.
+    ui.input(|i| {
+        actions.save = i.modifiers.command && i.key_pressed(egui::Key::S);
+        actions.undo = i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z);
+        actions.redo = i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z);
+    });
+    if let Some(st) = annot.as_deref_mut().filter(|_| !ui.ctx().egui_wants_keyboard_input()) {
+        for tool in annotate::Tool::ALL {
+            if ui.input(|i| !i.modifiers.command && i.key_pressed(tool.key())) {
+                st.tool = tool;
+                st.first = None;
+            }
+        }
+    }
+    if confirm {
+        if let Some(st) = annot.as_deref() {
+            actions.choice = annotate::confirm(ui, &st.author);
+        }
+    }
     egui::Panel::top("top").show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -120,20 +155,19 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                         actions.open = true;
                         ui.close();
                     }
-                    if ui.button("Save").clicked() {
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button("Import").clicked() {
+                    if ui.add(egui::Button::new("Save annotations").shortcut_text("⌘S / Ctrl+S")).clicked() {
+                        actions.save = true;
                         ui.close();
                     }
                 });
 
                 ui.menu_button("Edit", |ui| {
-                    if ui.button("Clear").clicked() {
+                    if ui.add(egui::Button::new("Undo").shortcut_text("⌘Z / Ctrl+Z")).clicked() {
+                        actions.undo = true;
                         ui.close();
                     }
-                    if ui.button("Reset").clicked() {
+                    if ui.add(egui::Button::new("Redo").shortcut_text("⇧⌘Z / Ctrl+Shift+Z")).clicked() {
+                        actions.redo = true;
                         ui.close();
                     }
                 });
@@ -148,10 +182,14 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new("v0.1.0").color(egui::Color32::ORANGE));
+                ui.label(egui::RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).color(egui::Color32::ORANGE));
                 ui.separator();
             });
         });
+        if let Some(st) = annot.as_deref_mut() {
+            ui.separator();
+            annotate::toolbar(ui, st);
+        }
     });
 
     let timeline = timeline.map(|t| {
@@ -178,13 +216,27 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         if (layers.node_ids || layers.hyperedge_ids) && labels.is_none() {
             ui.label(egui::RichText::new("zoom in to see ids").weak());
         }
+        if let (Some(st), Some(store)) = (annot.as_deref_mut(), store) {
+            ui.separator();
+            match annotate::panel(ui, st, store) {
+                annotate::PanelAction::Ops(ops) => actions.ops.extend(ops),
+                annotate::PanelAction::SwitchAuthor(name) => actions.switch_author = Some(name),
+                annotate::PanelAction::None => (),
+            }
+        }
     });
 
     egui::Panel::right("right").show_inside(ui, |ui| {
         ui.heading("Inspector");
         ui.separator();
         match (store, selection) {
-            (Some(store), Some(sel)) => actions.select = inspector(ui, store, sel, timeline),
+            (Some(store), Some(sel)) => {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let (select, ops) = inspector(ui, store, sel, timeline, annot.as_deref_mut());
+                    actions.select = select;
+                    actions.ops.extend(ops);
+                });
+            }
             _ => {
                 ui.label(egui::RichText::new("Click an edge or node").weak());
             }
@@ -192,8 +244,9 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
     });
 
     let map = ui.available_rect_before_wrap();
+    let painter = ui.painter_at(map);
+    painter.extend(overlay.iter().cloned());
     if let Some(labels) = labels {
-        let painter = ui.painter_at(map);
         for (pos, text) in labels {
             painter.text(
                 *pos,
@@ -208,9 +261,17 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
     actions
 }
 
-/// Property rows for the selection; returns a new selection if the user asked for one.
-fn inspector(ui: &mut egui::Ui, store: &Store, sel: Selection, timeline: Option<&Timeline>) -> Option<Selection> {
+/// Property rows for the selection, then the annotation fields. Returns a new selection if
+/// the user asked for one, and any annotation edits.
+fn inspector(
+    ui: &mut egui::Ui,
+    store: &Store,
+    sel: Selection,
+    timeline: Option<&Timeline>,
+    annot: Option<&mut AnnotationState>,
+) -> (Option<Selection>, Vec<Op>) {
     let mut select = None;
+    let mut ops = vec![];
     let row = |ui: &mut egui::Ui, key: &str, value: String| {
         ui.label(egui::RichText::new(key).weak());
         ui.label(value);
@@ -248,6 +309,9 @@ fn inspector(ui: &mut egui::Ui, store: &Store, sel: Selection, timeline: Option<
             if h >= 0 && ui.button(format!("Select hyperedge {h}")).clicked() {
                 select = Some(Selection::Hyperedge(h));
             }
+            if let Some(st) = annot {
+                ops = annotate::inspector_section(ui, st, store, Target::Edge(e));
+            }
         }
         Selection::Node(n) => {
             let edges = store.incident_edges(n);
@@ -266,6 +330,30 @@ fn inspector(ui: &mut egui::Ui, store: &Store, sel: Selection, timeline: Option<
                     }
                 }
             });
+            if let Some(st) = annot {
+                ops = annotate::inspector_section(ui, st, store, Target::Node(store.node_ids[n]));
+            }
+        }
+        Selection::Added(id) => {
+            ui.strong(format!("Added edge {id}"));
+            let Some(st) = annot else {
+                return (select, ops);
+            };
+            let mine = st.own.added.iter().find(|a| a.id == id).copied();
+            let found = mine.map(|a| (st.author.clone(), a)).or_else(|| {
+                st.others.iter().find_map(|(o, _)| o.added.iter().find(|a| a.id == id).map(|a| (o.author.clone(), *a)))
+            });
+            if let Some((author, a)) = found {
+                egui::Grid::new("added").num_columns(2).show(ui, |ui| {
+                    row(ui, "nodes", format!("{} – {}", a.u, a.v));
+                    row(ui, "author", author);
+                });
+            }
+            if let Some(a) = mine {
+                if ui.button("Remove").clicked() {
+                    ops.push(Op::RemoveAddedEdge(a));
+                }
+            }
         }
         Selection::Hyperedge(h) => {
             let edges = store.hyperedge_edges(h);
@@ -279,7 +367,7 @@ fn inspector(ui: &mut egui::Ui, store: &Store, sel: Selection, timeline: Option<
             });
         }
     }
-    select
+    (select, ops)
 }
 
 fn timeline_bar(ui: &mut egui::Ui, timeline: &mut Timeline) {

@@ -62,15 +62,26 @@ Unknown datasets or newer schema versions are shown in the inspector, never refu
 - One file per author (author name set once in preferences). Different authors may hold
   different interpretations; downstream analysis names the annotation file it used. No automatic
   merge; a compare/copy view can move records between annotation files (e.g. into `consensus`).
-- Contents: current-state tables (`/flags`, `/added_edges`, `/roots`, `/hyperedge_overrides`,
-  `/notes`, later `/flow_*`) **plus** an append-only `/history` (op, target, value, author,
-  utc) of every saved edit.
+- Contents (schema v1, one group per layer, 1-D columns so any HDF5 reader can open it):
+
+  | group | columns |
+  |---|---|
+  | `/excluded` | `edge_id` |
+  | `/duplicate_of` | `edge_id`, `of_edge_id` (consumers drop `edge_id`) |
+  | `/hyperedge_overrides` | `edge_id`, `hyperedge` |
+  | `/roots` | `node_id` |
+  | `/added_edges` | `id` (from 1 000 000), `u`, `v` (node ids; straight, no time/width) |
+  | `/notes` | `kind` (`edge`/`node`), `id`, `text` |
+  | `/history` | `utc`, `author`, `op` — append-only, every applied edit including undo/redo |
+
+  Later layers (`/flow_*` from video registration) are added as new groups.
 - Root attrs: `backbone_fingerprint` of the store it was authored against, `author`,
   `annotation_schema_version`, GrAMF version. Fingerprint mismatch = stale, shown loudly.
 - **Explicit save** (Cmd/Ctrl+S, dirty marker, prompt on close), in-memory undo/redo.
   Writes are atomic: write `*.tmp`, then rename.
-- On first open of a store carrying `/flow_*` or `/root_nodes`, offer a one-time import of
-  those into the user's annotation file.
+- A store carrying `/root_nodes` (old registrator) offers a one-time import into the user's
+  file; `/flow_*` import comes with the video-registration workflow (v2).
+- Author name: `~/.gramf/author`, else the OS user name; switchable in the Annotations panel.
 
 ## 4. Time model
 
@@ -186,7 +197,8 @@ Only implemented workflows get a button; v1 ships with one, so the switcher appe
   edited (always the user's own), checkbox = visible.
 - Node and hyperedge ids are always available (layer toggles + inspector), not dev-only.
 - View > Developer adds a bottom dock: store inspector, health checks, raw rows, timings.
-- Keys: ←/→ step frame, Space play, V/L/E/X/M/R tools, Home fit, Cmd/Ctrl+Z / Shift+Z,
+- Keys: ←/→ step frame, Space play, V/X/M/R/E tools, Esc cancels a tool step or clears the
+  selection, Home fit, Cmd/Ctrl+S save, Cmd/Ctrl+Z / Shift+Z,
   Cmd/Ctrl+1/2/3 switch workflow.
 
 ## 8. Technical direction
