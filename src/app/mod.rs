@@ -1,4 +1,5 @@
 mod annotate;
+mod dev_panel;
 mod export_dialog;
 mod ui;
 
@@ -49,7 +50,12 @@ pub struct App {
     export: export_dialog::ExportDialog,
     /// Registry UI of the open plate, else the id found in its path; names export folders.
     plate: String,
+    dev: dev_panel::DevState,
 }
+
+/// Graph colour while the evidence overlay is on, so the evidence stands out.
+const DIM: [f32; 4] = [0.22, 0.22, 0.22, 1.0];
+const ARC_SPAN: [f32; 4] = [0.2, 0.9, 1.0, 1.0];
 
 /// Click tolerance and the most id labels drawn at once.
 const PICK_RADIUS_PX: f32 = 6.0;
@@ -75,6 +81,7 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        let started = Instant::now();
         let store = match crate::store::read_store(path) {
             Ok(store) => store,
             Err(e) => {
@@ -84,7 +91,12 @@ impl App {
         };
         let n_timepoints = store.timepoints.len();
         renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, n_timepoints));
+        renderer.set_evidence(&store, &[]);
         self.selection = None;
+        self.dev.reset_store();
+        self.dev.evidence_on = false;
+        self.dev.timings.load_ms = ms(started);
+        let started = Instant::now();
 
         let candidates = registry::plate_candidates(path);
         let plate = registry::default_dir().and_then(|dir| registry::lookup(&dir, &candidates));
@@ -116,6 +128,57 @@ impl App {
         self.annot = Some(annot);
         self.store_path = Some(path.to_path_buf());
         self.store = Some(store);
+        self.dev.timings.annotations_ms = ms(started);
+    }
+
+    /// Fills the developer view lazily and keeps the evidence overlay on the current frame.
+    fn refresh_dev(&mut self) {
+        let (Some(store), Some(path)) = (self.store.as_ref(), self.store_path.as_ref()) else {
+            return;
+        };
+        let d = &mut self.dev;
+        if d.open && d.datasets.is_none() {
+            let datasets = crate::devtools::inspect(path);
+            if let Ok(list) = &datasets {
+                let annotations: Vec<&Annotations> = self
+                    .annot
+                    .iter()
+                    .flat_map(|st| std::iter::once(&st.own).chain(st.others.iter().map(|(a, _)| a)))
+                    .collect();
+                d.health = crate::devtools::health(path, store, list, &annotations);
+            }
+            d.datasets = Some(datasets);
+        }
+        if let (true, Some(ui::Selection::Edge(e)), Some(Ok(list))) = (d.open, self.selection, &d.datasets) {
+            if d.raw.as_ref().map(|r| r.0) != Some(e) {
+                d.raw = Some((e, crate::devtools::raw_rows(path, list, store.n_edges(), e)));
+            }
+        }
+        let (Some(renderer), Some(timeline)) = (self.renderer.as_mut(), self.timeline.as_ref()) else {
+            return;
+        };
+        if d.evidence_on && d.evidence_frame != Some(timeline.index) {
+            let started = Instant::now();
+            let evidence = d
+                .evidence
+                .get_or_insert_with(|| crate::devtools::read_evidence(path, timeline.axis.len(), store.n_edges()));
+            if let Ok(ev) = evidence {
+                let spans: Vec<(usize, f32, f32, [f32; 4])> = ev.by_frame[timeline.index]
+                    .iter()
+                    .map(|&(e, a, b)| {
+                        if ev.arc_spans {
+                            (e, a, b, ARC_SPAN)
+                        } else {
+                            let quality = if ev.score_semantic == "coverage" { a } else { 1.0 - a / ev.threshold };
+                            (e, f32::NEG_INFINITY, f32::INFINITY, crate::colour::viridis(quality))
+                        }
+                    })
+                    .collect();
+                renderer.set_evidence(store, &spans);
+            }
+            d.evidence_frame = Some(timeline.index);
+            d.timings.evidence_ms = ms(started);
+        }
     }
 
     fn save_annotations(&mut self) -> bool {
@@ -184,10 +247,12 @@ impl App {
             keep_excluded: !d.drop_flagged,
             tables: d.tables.clone(),
         };
+        let started = Instant::now();
         self.status = match crate::export::export(&folder, &req) {
             Ok(dir) => format!("Exported to {}", dir.display()),
             Err(e) => format!("Export failed: {e}"),
         };
+        self.dev.timings.export_ms = ms(started);
     }
 
     /// Carries out what waited on the unsaved-annotations prompt.
@@ -217,6 +282,12 @@ impl App {
 
     /// Acts on a click at window pixel `px` with the current tool.
     fn pick(&mut self, px: [f32; 2]) {
+        let started = Instant::now();
+        self.pick_inner(px);
+        self.dev.timings.pick_ms = ms(started);
+    }
+
+    fn pick_inner(&mut self, px: [f32; 2]) {
         let (Some(renderer), Some(store), Some(st)) = (self.renderer.as_ref(), self.store.as_ref(), self.annot.as_mut())
         else {
             return;
@@ -277,10 +348,18 @@ impl App {
     }
 
     fn apply(&mut self, actions: ui::UiActions) {
-        if actions.colour_changed {
+        if actions.colour_changed || actions.evidence_toggled {
             if let (Some(renderer), Some(store)) = (self.renderer.as_mut(), self.store.as_ref()) {
-                let colours = vertex_colours(store, self.layers.colour_by, store.timepoints.len());
+                let colours = if self.dev.evidence_on {
+                    vec![DIM; store.arcs.points.len()]
+                } else {
+                    vertex_colours(store, self.layers.colour_by, store.timepoints.len())
+                };
                 renderer.set_colours(store, &colours);
+                if !self.dev.evidence_on {
+                    renderer.set_evidence(store, &[]);
+                }
+                self.dev.evidence_frame = None;
                 self.select(self.selection); // set_colours drops the highlight
             }
         }
@@ -327,6 +406,10 @@ impl App {
                 .pick_file();
         }
     }
+}
+
+fn ms(since: Instant) -> f64 {
+    since.elapsed().as_secs_f64() * 1000.0
 }
 
 /// The user's own annotation file for the store at `path` (new if absent) and everyone
@@ -570,6 +653,8 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 let delta_time = now - *last_render_time;
                 *last_render_time = now;
+                let frame_ms = delta_time.as_secs_f64() * 1000.0;
+                self.dev.timings.frame_ms = 0.9 * self.dev.timings.frame_ms + 0.1 * frame_ms;
 
                 //take gui input
                 let gui_input = gui_state.take_egui_input(window);
@@ -622,6 +707,7 @@ impl ApplicationHandler for App {
                             overlay: &overlay,
                             confirm: self.confirm.is_some(),
                             export: &mut self.export,
+                            dev: &mut self.dev,
                         },
                     );
                 });
@@ -685,6 +771,7 @@ impl ApplicationHandler for App {
         if let Some(path) = self.pending_open.take() {
             self.open_store(&path);
         }
+        self.refresh_dev();
 
         let title = match (&self.store_path, self.dirty()) {
             (Some(p), dirty) => format!("{}GrAMF — {}", if dirty { "• " } else { "" }, p.display()),

@@ -21,6 +21,7 @@ nalgebra-glm = { version = "0.20.0", features = [
 ] }
 pollster = "0.4.0"
 rfd = "0.17.2"
+sha2 = "0.11.1"
 web-time = "1.1.0"
 wgpu = { version = "29", default-features = false }
 winit = "0.30.13"

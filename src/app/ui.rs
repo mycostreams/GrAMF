@@ -1,4 +1,5 @@
 use super::annotate::{self, AnnotationState, Choice};
+use super::dev_panel::{self, DevState};
 use super::export_dialog::{self, ExportDialog};
 use crate::annotations::{Op, Target};
 use crate::colour::ColourBy;
@@ -108,6 +109,7 @@ pub struct FrameState<'a> {
     /// Ask what to do with unsaved annotations.
     pub confirm: bool,
     pub export: &'a mut ExportDialog,
+    pub dev: &'a mut DevState,
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -123,12 +125,13 @@ pub struct UiActions {
     pub switch_author: Option<String>,
     pub choice: Option<Choice>,
     pub export: bool,
+    pub evidence_toggled: bool,
     /// Area left over between the panels, in points: where the map is drawn.
     pub map_rect: Option<egui::Rect>,
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export } =
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev } =
         frame;
     let mut actions = UiActions::default();
 
@@ -176,6 +179,10 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                     }
                 });
 
+                ui.menu_button("View", |ui| {
+                    ui.checkbox(&mut dev.open, "Developer view");
+                });
+
                 ui.menu_button("Edit", |ui| {
                     if ui.add(egui::Button::new("Undo").shortcut_text("⌘Z / Ctrl+Z")).clicked() {
                         actions.undo = true;
@@ -211,6 +218,13 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         egui::Panel::bottom("timeline").show_inside(ui, |ui| timeline_bar(ui, t));
         &*t
     });
+
+    if dev.open {
+        egui::Panel::bottom("developer")
+            .resizable(true)
+            .default_size(240.0)
+            .show_inside(ui, |ui| actions.evidence_toggled = dev_panel::show(ui, dev));
+    }
 
     egui::Panel::left("layers").show_inside(ui, |ui| {
         ui.heading("Layers");

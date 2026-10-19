@@ -75,6 +75,10 @@ impl AppRenderer {
             .set_selection(&self.gpu.device, &store.arcs, &store.vertex_t, edges);
     }
 
+    pub fn set_evidence(&mut self, store: &crate::store::Store, spans: &[(usize, f32, f32, [f32; 4])]) {
+        self.graph_renderer.set_evidence(&self.gpu.device, &store.arcs, spans);
+    }
+
     /// World position (µm) under window pixel `px`.
     pub fn screen_to_world(&self, px: [f32; 2]) -> [f32; 2] {
         let [x, y, w, h] = self.map_rect;

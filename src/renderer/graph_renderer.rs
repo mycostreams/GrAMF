@@ -21,6 +21,8 @@ pub struct GraphRenderer {
     pub uniform: CameraUniformBinding,
     pub pipeline: wgpu::RenderPipeline,
     graph: Option<GraphBuffers>,
+    /// Matcher evidence (developer view), drawn over the graph.
+    evidence: Option<GraphBuffers>,
     /// Selected edges, drawn again on top in the highlight colour.
     selection: Option<GraphBuffers>,
 }
@@ -37,6 +39,7 @@ impl GraphRenderer {
             uniform,
             pipeline,
             graph: None,
+            evidence: None,
             selection: None,
         }
     }
@@ -56,10 +59,38 @@ impl GraphRenderer {
         });
     }
 
+    /// Draws `(edge, s0, s1, colour)` spans — the part of each edge whose arc length lies in
+    /// `[s0, s1]` µm — regardless of the current time. Empty clears.
+    pub fn set_evidence(&mut self, device: &wgpu::Device, arcs: &Arcs, spans: &[(usize, f32, f32, [f32; 4])]) {
+        if spans.is_empty() {
+            self.evidence = None;
+            return;
+        }
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for &(e, s0, s1, colour) in spans {
+            let mut s = 0.0_f32;
+            for v in arcs.offsets[e]..arcs.offsets[e + 1] {
+                if v > arcs.offsets[e] {
+                    let (a, b) = (arcs.points[v - 1], arcs.points[v]);
+                    s += ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+                }
+                if s < s0 || s > s1 {
+                    continue;
+                }
+                indices.push(vertices.len() as u32);
+                let [x, y] = arcs.points[v];
+                vertices.push(Vertex { position: [x, y, 0.0, 1.0], color: colour, t: f32::NEG_INFINITY });
+            }
+            indices.push(RESTART);
+        }
+        self.evidence = Some(buffers(device, &vertices, &indices));
+    }
+
     pub fn render<'rpass>(&'rpass self, renderpass: &mut wgpu::RenderPass<'rpass>) {
         renderpass.set_pipeline(&self.pipeline);
         renderpass.set_bind_group(0, &self.uniform.bind_group, &[]);
-        for buffers in [&self.graph, &self.selection].into_iter().flatten() {
+        for buffers in [&self.graph, &self.evidence, &self.selection].into_iter().flatten() {
             renderpass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
             renderpass.set_index_buffer(buffers.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             renderpass.draw_indexed(0..buffers.index_count, 0, 0..1);
@@ -163,6 +194,10 @@ fn line_strips(
         indices.push(RESTART);
     }
 
+    buffers(device, &vertices, &indices)
+}
+
+fn buffers(device: &wgpu::Device, vertices: &[Vertex], indices: &[u32]) -> GraphBuffers {
     let buffer = |label, contents: &[u8], usage| {
         wgpu::util::DeviceExt::create_buffer_init(
             device,
@@ -174,8 +209,8 @@ fn line_strips(
         )
     };
     GraphBuffers {
-        vertex_buffer: buffer("Arc Vertex Buffer", bytemuck::cast_slice(&vertices), wgpu::BufferUsages::VERTEX),
-        index_buffer: buffer("Arc Index Buffer", bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
+        vertex_buffer: buffer("Arc Vertex Buffer", bytemuck::cast_slice(vertices), wgpu::BufferUsages::VERTEX),
+        index_buffer: buffer("Arc Index Buffer", bytemuck::cast_slice(indices), wgpu::BufferUsages::INDEX),
         index_count: indices.len() as u32,
     }
 }
