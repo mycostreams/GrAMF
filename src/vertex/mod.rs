@@ -1,4 +1,3 @@
-pub mod data;
 
 use wgpu::{VertexAttribute, VertexBufferLayout, VertexStepMode, vertex_attr_array};
 

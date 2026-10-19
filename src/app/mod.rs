@@ -2,11 +2,12 @@ mod ui;
 
 use crate::renderer::AppRenderer;
 use egui_winit::State;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use web_time::Instant;
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalSize;
-use winit::event::{KeyEvent, WindowEvent};
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Theme, Window, WindowId};
 
@@ -18,6 +19,35 @@ pub struct App {
     last_render_time: Option<Instant>,
     last_size: (u32, u32),
     initialized: bool,
+    /// Store to open once the renderer exists (command line or File > Open).
+    pending_open: Option<PathBuf>,
+    /// One line of feedback in the top bar: what is loaded, or why loading failed.
+    status: String,
+    cursor: PhysicalPosition<f64>,
+    dragging: bool,
+}
+
+impl App {
+    pub fn new(open: Option<PathBuf>) -> Self {
+        Self {
+            pending_open: open,
+            ..Default::default()
+        }
+    }
+
+    fn open_store(&mut self, path: &Path) {
+        let (Some(renderer), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else {
+            return;
+        };
+        match crate::store::read_arcs(path) {
+            Ok(arcs) => {
+                renderer.load_arcs(&arcs);
+                self.status = format!("{} edges · {} points", arcs.n_edges(), arcs.points.len());
+                window.set_title(&format!("GrAMF — {}", path.display()));
+            }
+            Err(e) => self.status = format!("Could not open {}: {e}", path.display()),
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -76,6 +106,10 @@ impl ApplicationHandler for App {
         self.gui_state = Some(gui_state);
         self.last_render_time = Some(Instant::now());
         self.initialized = true;
+
+        if let Some(path) = self.pending_open.take() {
+            self.open_store(&path);
+        }
     }
 
     /// Called when a window event occurs (e.g., keyboard input, resizing, etc.).
@@ -106,13 +140,34 @@ impl ApplicationHandler for App {
                 event:
                     KeyEvent {
                         physical_key: winit::keyboard::PhysicalKey::Code(key_code),
+                        state,
                         ..
                     },
                 ..
-            } => {
-                if matches!(key_code, winit::keyboard::KeyCode::Escape) {
-                    event_loop.exit();
+            } => match (key_code, state) {
+                (winit::keyboard::KeyCode::Escape, _) => event_loop.exit(),
+                (winit::keyboard::KeyCode::Home, ElementState::Pressed) => renderer.fit(),
+                _ => (),
+            },
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => self.dragging = state == ElementState::Pressed,
+            WindowEvent::CursorMoved { position, .. } => {
+                if self.dragging {
+                    let (dx, dy) = (position.x - self.cursor.x, position.y - self.cursor.y);
+                    renderer.pan(dx as f32, dy as f32);
                 }
+                self.cursor = position;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                // ponytail: fixed zoom speeds, make them a preference if trackpads feel off
+                let factor = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => 1.15_f32.powf(-y),
+                    MouseScrollDelta::PixelDelta(p) => (-p.y as f32 * 0.003).exp(),
+                };
+                renderer.zoom(factor, [self.cursor.x as f32, self.cursor.y as f32]);
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 let scale_factor = window.scale_factor() as f32;
@@ -142,6 +197,7 @@ impl ApplicationHandler for App {
 
                 //take gui input
                 let gui_input = gui_state.take_egui_input(window);
+                let mut actions = ui::UiActions::default();
 
                 //TODO: move this title to a constant or config file
                 let title = "GrAMF - Graphs for Arbuscular Mycorrhizal Fungi";
@@ -156,7 +212,7 @@ impl ApplicationHandler for App {
                     ..
                 } = gui_state.egui_ctx().run_ui(gui_input, |ui| {
                     // Build the UI using the `build_ui` function defined in the `ui` module
-                    ui::build_ui(ui, title);
+                    actions = ui::build_ui(ui, title, &self.status);
                 });
 
                 // Handle any platform output from egui (e.g., opening URLs, copying to clipboard, etc.)
@@ -177,6 +233,11 @@ impl ApplicationHandler for App {
                     }
                 };
 
+                // Map area must be known before rendering (fit uses its aspect)
+                if let Some(r) = actions.map_rect.map(|r| r * pixels_per_point) {
+                    renderer.set_map_rect([r.min.x, r.min.y, r.width(), r.height()]);
+                }
+
                 // Render frame
                 /*
                 Screen descriptor has width, height and dpi for all renderers to use
@@ -186,11 +247,21 @@ impl ApplicationHandler for App {
                 This function will render the graph scene, then the EGUI ui                
                  */
                 renderer.render_frame(screen_descriptor, paint_jobs, textures_delta, delta_time);
+
+                if actions.open {
+                    self.pending_open = rfd::FileDialog::new()
+                        .add_filter("STG store", &["h5"])
+                        .pick_file();
+                }
             }
             _ => (),
         }
 
         // Request a redraw of the window after processing the event to ensure that the UI is updated
         window.request_redraw();
+
+        if let Some(path) = self.pending_open.take() {
+            self.open_store(&path);
+        }
     }
 }

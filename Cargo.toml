@@ -11,12 +11,14 @@ egui-wgpu = { version = "0.34", features = ["winit"] }
 egui-winit = "0.34.2"
 env_logger = "0.11.10"
 futures = "0.3.32"
+hdf5-metno = { version = "0.15", features = ["static", "zlib"] }
 log = "0.4.29"
 nalgebra-glm = { version = "0.20.0", features = [
     "convert-bytemuck",
     "serde-serialize",
 ] }
 pollster = "0.4.0"
+rfd = "0.17.2"
 web-time = "1.1.0"
 wgpu = { version = "29", default-features = false }
 winit = "0.30.13"

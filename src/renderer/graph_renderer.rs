@@ -1,82 +1,100 @@
-use cgmath::{Deg, Rotation, Rotation3, Vector3};
-
 use crate::{
-    // uniform_binding::CameraUniformBinding,
     renderer::camera::{Camera, CameraUniform, CameraUniformBinding},
-    vertex::{Vertex, data::{EDGE_VERTS, EDGE_INDICES}},
+    store::Arcs,
+    vertex::Vertex,
 };
 
-/// A struct representing the 3D scene, including its model matrix, vertex/index buffers, uniform bindings, and render pipeline.
+/// Index value that ends one line strip and starts the next (primitive restart).
+const RESTART: u32 = u32::MAX;
+const EDGE_COLOR: [f32; 4] = [0.75, 0.9, 0.6, 1.0];
+
+/// GPU buffers for one loaded graph.
+struct GraphBuffers {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+/// Draws a graph's edge polylines as line strips through a 2D map camera.
 pub struct GraphRenderer {
     pub camera: Camera,
     pub camera_raw: CameraUniform,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
     pub uniform: CameraUniformBinding,
     pub pipeline: wgpu::RenderPipeline,
+    graph: Option<GraphBuffers>,
 }
 
 impl GraphRenderer {
-    /// Creates a new `GraphScene` instance, initializing the vertex/index buffers, uniform bindings, and render pipeline.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
-        let vertex_buffer = wgpu::util::DeviceExt::create_buffer_init(
-            device,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(&EDGE_VERTS),
-                usage: wgpu::BufferUsages::VERTEX,
-            },
-        );
-        let index_buffer = wgpu::util::DeviceExt::create_buffer_init(
-            device,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(&EDGE_INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            },
-        );
         let camera = Camera::default();
         let camera_raw = CameraUniform::from_camera(&camera, 1.0);
-        let uniform: CameraUniformBinding = CameraUniformBinding::new(device);
+        let uniform = CameraUniformBinding::new(device);
         let pipeline = Self::create_pipeline(device, surface_format, &uniform);
         Self {
             camera,
             camera_raw,
             uniform,
             pipeline,
-            vertex_buffer,
-            index_buffer,
+            graph: None,
         }
     }
 
-    /// Renders the scene using the provided render pass, setting the pipeline, bind groups, and vertex/index buffers.
-    pub fn render<'rpass>(&'rpass self, renderpass: &mut wgpu::RenderPass<'rpass>) {
-        renderpass.set_pipeline(&self.pipeline);
-        renderpass.set_bind_group(0, &self.uniform.bind_group, &[]);
+    /// Uploads every arc as one line strip; replaces any previously loaded graph.
+    pub fn set_arcs(&mut self, device: &wgpu::Device, arcs: &Arcs) {
+        let vertices: Vec<Vertex> = arcs
+            .points
+            .iter()
+            .map(|&[x, y]| Vertex {
+                position: [x, y, 0.0, 1.0],
+                color: EDGE_COLOR,
+            })
+            .collect();
+        let mut indices = Vec::with_capacity(arcs.points.len() + arcs.n_edges());
+        for edge in arcs.offsets.windows(2) {
+            indices.extend(edge[0] as u32..edge[1] as u32);
+            indices.push(RESTART);
+        }
 
-        renderpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        renderpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-
-        renderpass.draw_indexed(0..(EDGE_INDICES.len() as _), 0, 0..1);
+        let buffer = |label, contents: &[u8], usage| {
+            wgpu::util::DeviceExt::create_buffer_init(
+                device,
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents,
+                    usage,
+                },
+            )
+        };
+        self.graph = Some(GraphBuffers {
+            vertex_buffer: buffer(
+                "Arc Vertex Buffer",
+                bytemuck::cast_slice(&vertices),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            index_buffer: buffer(
+                "Arc Index Buffer",
+                bytemuck::cast_slice(&indices),
+                wgpu::BufferUsages::INDEX,
+            ),
+            index_count: indices.len() as u32,
+        });
     }
 
-    /// Updates the scene's model matrix and uniform buffer based on the aspect ratio and delta time.
-    pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, delta_time: f32) {
-        let rotation = cgmath::Quaternion::<f32>::from_axis_angle(
-            Vector3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            Deg(30_f32 * delta_time),
-        );
-        self.camera.position = rotation.rotate_point(self.camera.position);
+    pub fn render<'rpass>(&'rpass self, renderpass: &mut wgpu::RenderPass<'rpass>) {
+        let Some(graph) = &self.graph else {
+            return;
+        };
+        renderpass.set_pipeline(&self.pipeline);
+        renderpass.set_bind_group(0, &self.uniform.bind_group, &[]);
+        renderpass.set_vertex_buffer(0, graph.vertex_buffer.slice(..));
+        renderpass.set_index_buffer(graph.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        renderpass.draw_indexed(0..graph.index_count, 0, 0..1);
+    }
+
+    /// Writes the current camera to its uniform buffer.
+    pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32) {
         self.camera_raw.update_view_proj(&self.camera, aspect_ratio);
         self.uniform.update_buffer(queue, 0, self.camera_raw);
-
-        println!("Camera position: {:?}", self.camera.position);
-        println!("Camera target: {:?}", self.camera.target);
-        println!("Camera up: {:?}", self.camera.up);
     }
 
     /// Creates a render pipeline for the scene using the provided device, surface format, and uniform bindings.
@@ -109,7 +127,7 @@ impl GraphRenderer {
                 compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                topology: wgpu::PrimitiveTopology::LineStrip,
                 strip_index_format: Some(wgpu::IndexFormat::Uint32),
                 front_face: wgpu::FrontFace::Cw,
                 cull_mode: None,
