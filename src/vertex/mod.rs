@@ -1,4 +1,3 @@
-pub mod data;
 
 use wgpu::{VertexAttribute, VertexBufferLayout, VertexStepMode, vertex_attr_array};
 
@@ -7,11 +6,13 @@ use wgpu::{VertexAttribute, VertexBufferLayout, VertexStepMode, vertex_attr_arra
 pub struct Vertex {
     pub position: [f32; 4],
     pub color: [f32; 4],
+    /// Timepoint index at which this vertex first appears.
+    pub t: f32,
 }
 
 impl Vertex {
     pub fn vertex_attributes() -> Vec<VertexAttribute> {
-        vertex_attr_array![0 => Float32x4, 1 => Float32x4].to_vec()
+        vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32].to_vec()
     }
 
     pub fn description(attributes: &[VertexAttribute]) -> VertexBufferLayout<'_> {
@@ -55,10 +56,10 @@ impl EdgeInstance {
 impl EdgeInstanceRaw {
     pub fn vertex_attributes() -> Vec<VertexAttribute> {
         vertex_attr_array![
-            2 => Float32x3, // start_position
-            3 => Float32x3, // end_position
-            4 => Float32x4, // color
-            5 => Float32,   // width
+            3 => Float32x3, // start_position
+            4 => Float32x3, // end_position
+            5 => Float32x4, // color
+            6 => Float32,   // width
         ]
         .to_vec()
     }

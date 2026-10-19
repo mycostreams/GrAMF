@@ -1,82 +1,107 @@
-use cgmath::{Deg, Rotation, Rotation3, Vector3};
-
 use crate::{
-    // uniform_binding::CameraUniformBinding,
     renderer::camera::{Camera, CameraUniform, CameraUniformBinding},
-    vertex::{Vertex, data::{EDGE_VERTS, EDGE_INDICES}},
+    store::Arcs,
+    vertex::Vertex,
 };
 
-/// A struct representing the 3D scene, including its model matrix, vertex/index buffers, uniform bindings, and render pipeline.
+/// Index value that ends one line strip and starts the next (primitive restart).
+const RESTART: u32 = u32::MAX;
+
+/// GPU buffers for one loaded graph.
+struct GraphBuffers {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+/// Draws a graph's edge polylines as line strips through a 2D map camera.
 pub struct GraphRenderer {
     pub camera: Camera,
     pub camera_raw: CameraUniform,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
     pub uniform: CameraUniformBinding,
     pub pipeline: wgpu::RenderPipeline,
+    graph: Option<GraphBuffers>,
+    /// Matcher evidence (developer view), drawn over the graph.
+    evidence: Option<GraphBuffers>,
+    /// Selected edges, drawn again on top in the highlight colour.
+    selection: Option<GraphBuffers>,
 }
 
 impl GraphRenderer {
-    /// Creates a new `GraphScene` instance, initializing the vertex/index buffers, uniform bindings, and render pipeline.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
-        let vertex_buffer = wgpu::util::DeviceExt::create_buffer_init(
-            device,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(&EDGE_VERTS),
-                usage: wgpu::BufferUsages::VERTEX,
-            },
-        );
-        let index_buffer = wgpu::util::DeviceExt::create_buffer_init(
-            device,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(&EDGE_INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            },
-        );
         let camera = Camera::default();
         let camera_raw = CameraUniform::from_camera(&camera, 1.0);
-        let uniform: CameraUniformBinding = CameraUniformBinding::new(device);
+        let uniform = CameraUniformBinding::new(device);
         let pipeline = Self::create_pipeline(device, surface_format, &uniform);
         Self {
             camera,
             camera_raw,
             uniform,
             pipeline,
-            vertex_buffer,
-            index_buffer,
+            graph: None,
+            evidence: None,
+            selection: None,
         }
     }
 
-    /// Renders the scene using the provided render pass, setting the pipeline, bind groups, and vertex/index buffers.
+    /// Uploads every arc as one line strip; replaces any previously loaded graph.
+    /// `vertex_t` and `colours` are row-aligned with `arcs.points`. Replaces any previously
+    /// loaded graph.
+    pub fn set_arcs(&mut self, device: &wgpu::Device, arcs: &Arcs, vertex_t: &[f32], colours: &[[f32; 4]]) {
+        self.graph = Some(line_strips(device, arcs, vertex_t, 0..arcs.n_edges(), |v| colours[v]));
+        self.selection = None;
+    }
+
+    /// Highlights `edges` (empty clears the selection).
+    pub fn set_selection(&mut self, device: &wgpu::Device, arcs: &Arcs, vertex_t: &[f32], edges: &[usize]) {
+        self.selection = (!edges.is_empty()).then(|| {
+            line_strips(device, arcs, vertex_t, edges.iter().copied(), |_| crate::colour::HIGHLIGHT)
+        });
+    }
+
+    /// Draws `(edge, s0, s1, colour)` spans — the part of each edge whose arc length lies in
+    /// `[s0, s1]` µm — regardless of the current time. Empty clears.
+    pub fn set_evidence(&mut self, device: &wgpu::Device, arcs: &Arcs, spans: &[(usize, f32, f32, [f32; 4])]) {
+        if spans.is_empty() {
+            self.evidence = None;
+            return;
+        }
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for &(e, s0, s1, colour) in spans {
+            let mut s = 0.0_f32;
+            for v in arcs.offsets[e]..arcs.offsets[e + 1] {
+                if v > arcs.offsets[e] {
+                    let (a, b) = (arcs.points[v - 1], arcs.points[v]);
+                    s += ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+                }
+                if s < s0 || s > s1 {
+                    continue;
+                }
+                indices.push(vertices.len() as u32);
+                let [x, y] = arcs.points[v];
+                vertices.push(Vertex { position: [x, y, 0.0, 1.0], color: colour, t: f32::NEG_INFINITY });
+            }
+            indices.push(RESTART);
+        }
+        self.evidence = Some(buffers(device, &vertices, &indices));
+    }
+
     pub fn render<'rpass>(&'rpass self, renderpass: &mut wgpu::RenderPass<'rpass>) {
         renderpass.set_pipeline(&self.pipeline);
         renderpass.set_bind_group(0, &self.uniform.bind_group, &[]);
-
-        renderpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        renderpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-
-        renderpass.draw_indexed(0..(EDGE_INDICES.len() as _), 0, 0..1);
+        for buffers in [&self.graph, &self.evidence, &self.selection].into_iter().flatten() {
+            renderpass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+            renderpass.set_index_buffer(buffers.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            renderpass.draw_indexed(0..buffers.index_count, 0, 0..1);
+        }
     }
 
-    /// Updates the scene's model matrix and uniform buffer based on the aspect ratio and delta time.
-    pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, delta_time: f32) {
-        let rotation = cgmath::Quaternion::<f32>::from_axis_angle(
-            Vector3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            Deg(30_f32 * delta_time),
-        );
-        self.camera.position = rotation.rotate_point(self.camera.position);
+    /// Writes the current camera and timepoint to the uniform buffer.
+    pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, t: f32) {
         self.camera_raw.update_view_proj(&self.camera, aspect_ratio);
+        self.camera_raw.set_time(t);
         self.uniform.update_buffer(queue, 0, self.camera_raw);
-
-        println!("Camera position: {:?}", self.camera.position);
-        println!("Camera target: {:?}", self.camera.target);
-        println!("Camera up: {:?}", self.camera.up);
     }
 
     /// Creates a render pipeline for the scene using the provided device, surface format, and uniform bindings.
@@ -109,7 +134,7 @@ impl GraphRenderer {
                 compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                topology: wgpu::PrimitiveTopology::LineStrip,
                 strip_index_format: Some(wgpu::IndexFormat::Uint32),
                 front_face: wgpu::FrontFace::Cw,
                 cull_mode: None,
@@ -120,7 +145,8 @@ impl GraphRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                // LessEqual: everything sits at z = 0, so later draws (the selection) win
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -142,5 +168,49 @@ impl GraphRenderer {
             multiview_mask: None,
             cache: None,
         })
+    }
+}
+
+/// One line strip per edge in `edges`, separated by primitive restarts.
+fn line_strips(
+    device: &wgpu::Device,
+    arcs: &Arcs,
+    vertex_t: &[f32],
+    edges: impl Iterator<Item = usize>,
+    colour: impl Fn(usize) -> [f32; 4],
+) -> GraphBuffers {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for e in edges {
+        for v in arcs.offsets[e]..arcs.offsets[e + 1] {
+            indices.push(vertices.len() as u32);
+            let [x, y] = arcs.points[v];
+            vertices.push(Vertex {
+                position: [x, y, 0.0, 1.0],
+                color: colour(v),
+                t: vertex_t[v],
+            });
+        }
+        indices.push(RESTART);
+    }
+
+    buffers(device, &vertices, &indices)
+}
+
+fn buffers(device: &wgpu::Device, vertices: &[Vertex], indices: &[u32]) -> GraphBuffers {
+    let buffer = |label, contents: &[u8], usage| {
+        wgpu::util::DeviceExt::create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            },
+        )
+    };
+    GraphBuffers {
+        vertex_buffer: buffer("Arc Vertex Buffer", bytemuck::cast_slice(vertices), wgpu::BufferUsages::VERTEX),
+        index_buffer: buffer("Arc Index Buffer", bytemuck::cast_slice(indices), wgpu::BufferUsages::INDEX),
+        index_count: indices.len() as u32,
     }
 }
