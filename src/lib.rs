@@ -7,6 +7,7 @@ pub mod registry;
 pub mod renderer;
 pub mod store;
 pub mod time;
+pub mod update;
 pub mod vertex;
 
 pub use app::App;

@@ -1,5 +1,5 @@
-// mod app;
-// mod render;
+// No console window behind the app in Windows release builds.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use GrAMF::App;
 // use winit::event_loop::{ControlFlow, EventLoop};

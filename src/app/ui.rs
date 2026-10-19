@@ -110,6 +110,8 @@ pub struct FrameState<'a> {
     pub confirm: bool,
     pub export: &'a mut ExportDialog,
     pub dev: &'a mut DevState,
+    /// Tag of a newer release, if the startup check found one.
+    pub update: Option<&'a str>,
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -131,7 +133,7 @@ pub struct UiActions {
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev } =
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update } =
         frame;
     let mut actions = UiActions::default();
 
@@ -205,6 +207,9 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).color(egui::Color32::ORANGE));
+                if let Some(tag) = update {
+                    ui.hyperlink_to(format!("{tag} available"), crate::update::RELEASES_URL);
+                }
                 ui.separator();
             });
         });

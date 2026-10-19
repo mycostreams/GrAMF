@@ -51,6 +51,8 @@ pub struct App {
     /// Registry UI of the open plate, else the id found in its path; names export folders.
     plate: String,
     dev: dev_panel::DevState,
+    update_check: Option<std::sync::mpsc::Receiver<String>>,
+    update: Option<String>,
 }
 
 /// Graph colour while the evidence overlay is on, so the evidence stands out.
@@ -528,6 +530,7 @@ impl ApplicationHandler for App {
 
         if !self.initialized {
             env_logger::init();
+            self.update_check = Some(crate::update::spawn_check());
         }
         let renderer =
             pollster::block_on(
@@ -708,6 +711,7 @@ impl ApplicationHandler for App {
                             confirm: self.confirm.is_some(),
                             export: &mut self.export,
                             dev: &mut self.dev,
+                            update: self.update.as_deref(),
                         },
                     );
                 });
@@ -772,6 +776,9 @@ impl ApplicationHandler for App {
             self.open_store(&path);
         }
         self.refresh_dev();
+        if let Some(tag) = self.update_check.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.update = Some(tag);
+        }
 
         let title = match (&self.store_path, self.dirty()) {
             (Some(p), dirty) => format!("{}GrAMF — {}", if dirty { "• " } else { "" }, p.display()),
