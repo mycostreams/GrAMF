@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+#[derive(Default)]
 /// Edge polylines in µm, from `/arcs_points` + `/arcs_offsets` (N+1 CSR):
 /// edge `i` is `points[offsets[i]..offsets[i + 1]]`. `x` is the image column, `y` the row.
 pub struct Arcs {
@@ -20,6 +21,7 @@ impl Arcs {
 }
 
 /// What GrAMF reads from one store.
+#[derive(Default)]
 pub struct Store {
     pub arcs: Arcs,
     /// Timepoint index at which each arc vertex first appears, row-aligned with
@@ -64,6 +66,24 @@ struct WidthSegment {
     s_end_um: f64,
     width_um: f64,
     width_se_um: f64,
+}
+
+/// One `/edge_width_timesteps` row (schema v2): both width estimators per (edge, frame).
+#[derive(hdf5_metno::H5Type, Clone, Copy)]
+#[repr(C)]
+pub struct WidthTimestep {
+    pub edge_id: i64,
+    pub timepoint_index: i64,
+    pub width_um: f64,
+    pub width_seg_um: f64,
+}
+
+/// Read on demand (exports only): ~0.6M rows on a large plate.
+pub fn read_width_timesteps(path: &Path) -> Result<Vec<WidthTimestep>, String> {
+    let file = hdf5_metno::File::open(path).map_err(|e| e.to_string())?;
+    file.dataset("edge_width_timesteps")
+        .and_then(|d| d.read_raw::<WidthTimestep>())
+        .map_err(|e| format!("/edge_width_timesteps: {e}"))
 }
 
 pub fn read_store(path: &Path) -> Result<Store, String> {

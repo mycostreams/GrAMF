@@ -1,4 +1,5 @@
 mod annotate;
+mod export_dialog;
 mod ui;
 
 use crate::annotations::{self, AddedEdge, Annotations, Op};
@@ -45,6 +46,9 @@ pub struct App {
     quit: bool,
     /// Last window title set, to avoid resetting it every frame.
     window_title: String,
+    export: export_dialog::ExportDialog,
+    /// Registry UI of the open plate, else the id found in its path; names export folders.
+    plate: String,
 }
 
 /// Click tolerance and the most id labels drawn at once.
@@ -90,6 +94,11 @@ impl App {
             None => format!("{} not in registry", candidates[0]),
         };
         self.status = format!("{plate_status} · {} edges", store.arcs.n_edges());
+        self.plate = plate
+            .as_ref()
+            .map(|p| p.ui.clone())
+            .or_else(|| candidates.first().cloned())
+            .unwrap_or_else(|| "plate".into());
 
         self.timeline = TimeAxis::new(
             store.timepoints.clone(),
@@ -124,6 +133,61 @@ impl App {
                 false
             }
         }
+    }
+
+    fn export_tables(&mut self) {
+        let (Some(store), Some(path), Some(renderer)) = (self.store.as_ref(), self.store_path.as_ref(), self.renderer.as_ref())
+        else {
+            return;
+        };
+        let d = &self.export;
+        let (edges, scope): (Vec<usize>, String) = match d.scope {
+            export_dialog::Scope::Plate => ((0..store.n_edges()).collect(), "whole plate".into()),
+            export_dialog::Scope::View => {
+                let (min, max) = renderer.visible_world();
+                let inside = |p: &[f32; 2]| p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1];
+                let t = renderer.time;
+                let edges = (0..store.n_edges())
+                    .filter(|&e| store.edge_t[e] <= t)
+                    .filter(|&e| store.arcs.points[store.arcs.offsets[e]..store.arcs.offsets[e + 1]].iter().any(inside))
+                    .collect();
+                let t_label = if t.is_finite() && t < f32::MAX { format!("timepoint {t}") } else { "all time".into() };
+                (edges, format!("in view x {:.0}..{:.0} µm, y {:.0}..{:.0} µm, {t_label}", min[0], max[0], min[1], max[1]))
+            }
+            export_dialog::Scope::Selection => match self.selection {
+                Some(ui::Selection::Edge(e)) => (vec![e], format!("edge {e}")),
+                Some(ui::Selection::Node(n)) => (store.incident_edges(n), format!("edges of node {}", store.node_ids[n])),
+                Some(ui::Selection::Hyperedge(h)) => (store.hyperedge_edges(h), format!("hyperedge {h}")),
+                Some(ui::Selection::Added(id)) => (vec![], format!("added edge {id}")),
+                None => (vec![], "empty selection".into()),
+            },
+        };
+        let annotations = self.annot.as_ref().and_then(|st| {
+            let author = d.author.as_ref()?;
+            if *author == st.author {
+                Some(&st.own)
+            } else {
+                st.others.iter().map(|(a, _)| a).find(|a| a.author == *author)
+            }
+        });
+        let Some(folder) = rfd::FileDialog::new().set_title("Export tables into…").pick_folder() else {
+            return;
+        };
+        let req = crate::export::Request {
+            store,
+            store_path: path,
+            plate: &self.plate,
+            axis: self.timeline.as_ref().map(|t| &t.axis),
+            annotations,
+            edges,
+            scope,
+            keep_excluded: !d.drop_flagged,
+            tables: d.tables.clone(),
+        };
+        self.status = match crate::export::export(&folder, &req) {
+            Ok(dir) => format!("Exported to {}", dir.display()),
+            Err(e) => format!("Export failed: {e}"),
+        };
     }
 
     /// Carries out what waited on the unsaved-annotations prompt.
@@ -253,6 +317,9 @@ impl App {
                     annotate::Choice::Cancel => (),
                 }
             }
+        }
+        if actions.export {
+            self.export_tables();
         }
         if actions.open {
             self.pending_open = rfd::FileDialog::new()
@@ -554,6 +621,7 @@ impl ApplicationHandler for App {
                             annot: self.annot.as_mut(),
                             overlay: &overlay,
                             confirm: self.confirm.is_some(),
+                            export: &mut self.export,
                         },
                     );
                 });

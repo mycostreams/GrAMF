@@ -104,10 +104,12 @@ Columns are matched by header name, not position. `NOW_` beats `OLD_`; files nam
 
 ## 5. Exports (v1: raw tables only)
 
-One Export dialog: tables as checkboxes, scope = whole plate / selection / visible at t,
+One Export dialog (File > Export tables…): tables as checkboxes, scope = whole plate / in view
+and appeared by the current t / current selection (edge, node or hyperedge; a lasso comes later),
 and which author's annotation file to apply (excluded edges dropped, or kept with `excluded=1` —
 default keep-and-flag). Every export folder gets a `README.txt` (source path, fingerprint,
-annotation file author, units, GrAMF version).
+annotation author, units, GrAMF version). Output goes to a new `gramf_export_<plate>_<time>`
+folder inside the folder the user picks, so nothing is overwritten.
 
 - `edges.csv` — `edge_id, u, v, length_um, t_first, t_first_h_inoc, t_first_h_cross,
   width_um, width_se_um, hyperedge, x_mid_um, y_mid_um, excluded, duplicate_of, note`

@@ -1,4 +1,5 @@
 use super::annotate::{self, AnnotationState, Choice};
+use super::export_dialog::{self, ExportDialog};
 use crate::annotations::{Op, Target};
 use crate::colour::ColourBy;
 use crate::store::Store;
@@ -106,6 +107,7 @@ pub struct FrameState<'a> {
     pub overlay: &'a [egui::Shape],
     /// Ask what to do with unsaved annotations.
     pub confirm: bool,
+    pub export: &'a mut ExportDialog,
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -120,12 +122,14 @@ pub struct UiActions {
     pub redo: bool,
     pub switch_author: Option<String>,
     pub choice: Option<Choice>,
+    pub export: bool,
     /// Area left over between the panels, in points: where the map is drawn.
     pub map_rect: Option<egui::Rect>,
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm } = frame;
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export } =
+        frame;
     let mut actions = UiActions::default();
 
     // Shortcuts; single-letter tool keys only while no text field has focus.
@@ -147,6 +151,13 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             actions.choice = annotate::confirm(ui, &st.author);
         }
     }
+    if export.open {
+        let authors: Vec<String> = annot
+            .as_deref()
+            .map(|st| std::iter::once(st.author.clone()).chain(st.others.iter().map(|(a, _)| a.author.clone())).collect())
+            .unwrap_or_default();
+        actions.export = export_dialog::show(ui.ctx(), export, &authors, selection.is_some());
+    }
     egui::Panel::top("top").show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -157,6 +168,10 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                     }
                     if ui.add(egui::Button::new("Save annotations").shortcut_text("⌘S / Ctrl+S")).clicked() {
                         actions.save = true;
+                        ui.close();
+                    }
+                    if ui.add_enabled(store.is_some(), egui::Button::new("Export tables…")).clicked() {
+                        export.open = true;
                         ui.close();
                     }
                 });
