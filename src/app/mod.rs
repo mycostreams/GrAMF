@@ -1,7 +1,9 @@
 mod ui;
 
+use crate::colour::vertex_colours;
 use crate::registry;
 use crate::renderer::AppRenderer;
+use crate::store::Store;
 use crate::time::TimeAxis;
 use egui_winit::State;
 use std::path::{Path, PathBuf};
@@ -27,8 +29,17 @@ pub struct App {
     status: String,
     cursor: PhysicalPosition<f64>,
     dragging: bool,
+    /// Where the left button went down; a release close by is a click, not a drag.
+    press: Option<PhysicalPosition<f64>>,
     timeline: Option<ui::Timeline>,
+    store: Option<Store>,
+    selection: Option<ui::Selection>,
+    layers: ui::Layers,
 }
+
+/// Click tolerance and the most id labels drawn at once.
+const PICK_RADIUS_PX: f32 = 6.0;
+const MAX_LABELS: usize = 1500;
 
 impl App {
     pub fn new(open: Option<PathBuf>) -> Self {
@@ -49,7 +60,9 @@ impl App {
                 return;
             }
         };
-        renderer.load_store(&store);
+        let n_timepoints = store.timepoints.len();
+        renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, n_timepoints));
+        self.selection = None;
         window.set_title(&format!("GrAMF — {}", path.display()));
 
         let candidates = registry::plate_candidates(path);
@@ -62,14 +75,97 @@ impl App {
         self.status = format!("{plate_status} · {} edges", store.arcs.n_edges());
 
         self.timeline = TimeAxis::new(
-            store.timepoints,
-            store.quality,
+            store.timepoints.clone(),
+            store.quality.clone(),
             plate.as_ref().and_then(|p| p.inoculation),
             plate.as_ref().and_then(|p| p.crossed),
         )
         .map(ui::Timeline::new);
         renderer.time = self.timeline.as_ref().map_or(f32::MAX, |t| t.index as f32);
+        self.store = Some(store);
     }
+
+    fn select(&mut self, selection: Option<ui::Selection>) {
+        let (Some(renderer), Some(store)) = (self.renderer.as_mut(), self.store.as_ref()) else {
+            return;
+        };
+        self.selection = selection;
+        let edges = match selection {
+            Some(ui::Selection::Edge(e)) => vec![e],
+            Some(ui::Selection::Node(n)) => store.incident_edges(n),
+            Some(ui::Selection::Hyperedge(h)) => store.hyperedge_edges(h),
+            None => vec![],
+        };
+        renderer.set_selection(store, &edges);
+    }
+
+    /// Selects the node, else the edge, under window pixel `px`; empty space clears.
+    fn pick(&mut self, px: [f32; 2]) {
+        let (Some(renderer), Some(store)) = (self.renderer.as_ref(), self.store.as_ref()) else {
+            return;
+        };
+        let at = renderer.screen_to_world(px);
+        let radius = PICK_RADIUS_PX * renderer.um_per_px();
+        let picked = store
+            .pick_node(at, radius, renderer.time)
+            .map(ui::Selection::Node)
+            .or_else(|| store.pick_edge(at, radius, renderer.time).map(ui::Selection::Edge));
+        self.select(picked);
+    }
+
+    fn apply(&mut self, actions: ui::UiActions) {
+        if actions.colour_changed {
+            if let (Some(renderer), Some(store)) = (self.renderer.as_mut(), self.store.as_ref()) {
+                let colours = vertex_colours(store, self.layers.colour_by, store.timepoints.len());
+                renderer.set_colours(store, &colours);
+                self.select(self.selection); // set_colours drops the highlight
+            }
+        }
+        if actions.select.is_some() {
+            self.select(actions.select);
+        }
+        if actions.open {
+            self.pending_open = rfd::FileDialog::new()
+                .add_filter("STG store", &["h5"])
+                .pick_file();
+        }
+    }
+}
+
+/// Id labels inside the view for items that have appeared by the current time, in points;
+/// `None` when more than [`MAX_LABELS`] would be drawn.
+fn id_labels(store: &Store, layers: &ui::Layers, renderer: &AppRenderer, ppp: f32) -> Option<Vec<(egui::Pos2, String)>> {
+    let (min, max) = renderer.visible_world();
+    let inside = |p: [f32; 2]| p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1];
+    let t = renderer.time;
+    let mut items: Vec<([f32; 2], String)> = Vec::new();
+    if layers.node_ids {
+        for n in (0..store.node_pos.len()).filter(|&n| store.node_t[n] <= t && inside(store.node_pos[n])) {
+            items.push((store.node_pos[n], store.node_ids[n].to_string()));
+            if items.len() > MAX_LABELS {
+                return None;
+            }
+        }
+    }
+    if layers.hyperedge_ids {
+        for (h, p, ht) in &store.hyperedge_anchors {
+            if *ht <= t && inside(*p) {
+                items.push((*p, format!("H{h}")));
+                if items.len() > MAX_LABELS {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(
+        items
+            .into_iter()
+            .map(|(p, text)| {
+                let [x, y] = renderer.world_to_screen(p);
+                (egui::pos2(x / ppp, y / ppp), text)
+            })
+            .collect(),
+    )
 }
 
 impl ApplicationHandler for App {
@@ -156,6 +252,10 @@ impl ApplicationHandler for App {
             return;
         }
 
+        // Acted on after the event, once the borrows above are released
+        let mut ui_actions = None;
+        let mut click = None;
+
         // Handle specific window events such as keyboard input, resizing, and redraw requests
         match event {
             WindowEvent::KeyboardInput {
@@ -185,7 +285,16 @@ impl ApplicationHandler for App {
                 state,
                 button: MouseButton::Left,
                 ..
-            } => self.dragging = state == ElementState::Pressed,
+            } => {
+                self.dragging = state == ElementState::Pressed;
+                if self.dragging {
+                    self.press = Some(self.cursor);
+                } else if let Some(p) = self.press.take() {
+                    if (p.x - self.cursor.x).hypot(p.y - self.cursor.y) < 4.0 {
+                        click = Some([self.cursor.x as f32, self.cursor.y as f32]);
+                    }
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 if self.dragging {
                     let (dx, dy) = (position.x - self.cursor.x, position.y - self.cursor.y);
@@ -230,6 +339,12 @@ impl ApplicationHandler for App {
                 //take gui input
                 let gui_input = gui_state.take_egui_input(window);
                 let mut actions = ui::UiActions::default();
+                let ppp = gui_state.egui_ctx().pixels_per_point();
+                let labels = self
+                    .store
+                    .as_ref()
+                    .filter(|_| self.layers.node_ids || self.layers.hyperedge_ids)
+                    .and_then(|store| id_labels(store, &self.layers, renderer, ppp));
                 if let Some(timeline) = self.timeline.as_mut() {
                     timeline.advance(delta_time.as_secs_f32());
                 }
@@ -247,7 +362,18 @@ impl ApplicationHandler for App {
                     ..
                 } = gui_state.egui_ctx().run_ui(gui_input, |ui| {
                     // Build the UI using the `build_ui` function defined in the `ui` module
-                    actions = ui::build_ui(ui, title, &self.status, self.timeline.as_mut());
+                    actions = ui::build_ui(
+                        ui,
+                        ui::FrameState {
+                            title,
+                            status: &self.status,
+                            timeline: self.timeline.as_mut(),
+                            layers: &mut self.layers,
+                            store: self.store.as_ref(),
+                            selection: self.selection,
+                            labels: labels.as_deref(),
+                        },
+                    );
                 });
 
                 // Handle any platform output from egui (e.g., opening URLs, copying to clipboard, etc.)
@@ -286,12 +412,7 @@ impl ApplicationHandler for App {
                 This function will render the graph scene, then the EGUI ui                
                  */
                 renderer.render_frame(screen_descriptor, paint_jobs, textures_delta, delta_time);
-
-                if actions.open {
-                    self.pending_open = rfd::FileDialog::new()
-                        .add_filter("STG store", &["h5"])
-                        .pick_file();
-                }
+                ui_actions = Some(actions);
             }
             _ => (),
         }
@@ -299,6 +420,12 @@ impl ApplicationHandler for App {
         // Request a redraw of the window after processing the event to ensure that the UI is updated
         window.request_redraw();
 
+        if let Some(px) = click {
+            self.pick(px);
+        }
+        if let Some(actions) = ui_actions {
+            self.apply(actions);
+        }
         if let Some(path) = self.pending_open.take() {
             self.open_store(&path);
         }

@@ -1,4 +1,5 @@
 pub mod app;
+pub mod colour;
 pub mod renderer;
 pub mod registry;
 pub mod store;

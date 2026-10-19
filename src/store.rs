@@ -1,6 +1,7 @@
 //! Read-only access to STHype's `stg_store.h5`. GrAMF never opens a store for writing
 //! (DESIGN.md §2); `hdf5_metno::File::open` is read-only.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Edge polylines in µm, from `/arcs_points` + `/arcs_offsets` (N+1 CSR):
@@ -28,6 +29,37 @@ pub struct Store {
     /// empty when absent.
     pub timepoints: Vec<i64>,
     pub quality: Vec<f64>,
+
+    /// `/nodes`: pipeline node id and position (µm).
+    pub node_ids: Vec<i64>,
+    pub node_pos: Vec<[f32; 2]>,
+    /// Node id -> row in `node_ids`.
+    pub node_index: HashMap<i64, usize>,
+    /// `/edges`: endpoint node ids, row = `edge_id`. Empty when absent.
+    pub edge_nodes: Vec<[i64; 2]>,
+    /// Per edge (row = `edge_id`):
+    pub edge_length_um: Vec<f32>,
+    /// Earliest appearance along the edge (timepoint index).
+    pub edge_t: Vec<f32>,
+    /// `/hyperedges`; -1 = none (also when the dataset is absent).
+    pub hyperedge: Vec<i64>,
+    /// Length-weighted `(width_um, width_se_um)` over `/edge_width_segments`.
+    pub width: Vec<Option<(f32, f32)>>,
+    /// Per node: appearance time of its earliest incident edge (-inf without edges).
+    pub node_t: Vec<f32>,
+    /// Per hyperedge: id, label anchor (middle of its longest edge) and first appearance.
+    pub hyperedge_anchors: Vec<(i64, [f32; 2], f32)>,
+}
+
+/// The `/edge_width_segments` columns GrAMF uses (HDF5 converts compound members by name).
+#[derive(hdf5_metno::H5Type, Clone, Copy)]
+#[repr(C)]
+struct WidthSegment {
+    edge_id: i64,
+    s_start_um: f64,
+    s_end_um: f64,
+    width_um: f64,
+    width_se_um: f64,
 }
 
 pub fn read_store(path: &Path) -> Result<Store, String> {
@@ -68,12 +100,201 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         return Err("/timepoints_quality_weight and /timepoints differ in length".into());
     }
 
+    let n_edges = arcs.n_edges();
+    let check = |name: &str, len: usize| {
+        if len == n_edges {
+            Ok(())
+        } else {
+            Err(format!("/{name} has {len} rows for {n_edges} edges"))
+        }
+    };
+
+    let nodes = read_f64("nodes").unwrap_or_default();
+    let node_ids: Vec<i64> = nodes.chunks_exact(3).map(|n| n[0] as i64).collect();
+    let node_pos = nodes.chunks_exact(3).map(|n| [n[1] as f32, n[2] as f32]).collect();
+    let node_index: HashMap<i64, usize> = node_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+
+    let edge_nodes: Vec<[i64; 2]> = read_i64("edges")
+        .unwrap_or_default()
+        .chunks_exact(2)
+        .map(|e| [e[0], e[1]])
+        .collect();
+    if !edge_nodes.is_empty() {
+        check("edges", edge_nodes.len())?;
+    }
+
+    let edge_length_um = match read_f64("edge_lengths_um") {
+        Ok(l) => {
+            check("edge_lengths_um", l.len())?;
+            l.iter().map(|&x| x as f32).collect()
+        }
+        Err(_) => polyline_lengths(&arcs),
+    };
+
+    let edge_t: Vec<f32> = arcs
+        .offsets
+        .windows(2)
+        .map(|e| vertex_t[e[0]..e[1]].iter().copied().fold(f32::INFINITY, f32::min))
+        .collect();
+
+    let hyperedge = match read_i64("hyperedges") {
+        Ok(h) => {
+            check("hyperedges", h.len())?;
+            h
+        }
+        Err(_) => vec![-1; n_edges],
+    };
+
+    let mut width = vec![None; n_edges];
+    if let Ok(segments) = file
+        .dataset("edge_width_segments")
+        .and_then(|d| d.read_raw::<WidthSegment>())
+    {
+        width = mean_widths(n_edges, &segments)?;
+    }
+
+    let mut node_t = vec![f32::INFINITY; node_ids.len()];
+    for (e, ends) in edge_nodes.iter().enumerate() {
+        for id in ends {
+            if let Some(&n) = node_index.get(id) {
+                node_t[n] = node_t[n].min(edge_t[e]);
+            }
+        }
+    }
+    for t in node_t.iter_mut().filter(|t| t.is_infinite()) {
+        *t = f32::NEG_INFINITY;
+    }
+
+    // (longest edge, its length, earliest t) per hyperedge
+    let mut by_h: HashMap<i64, (usize, f32, f32)> = HashMap::new();
+    for (e, &h) in hyperedge.iter().enumerate().filter(|(_, h)| **h >= 0) {
+        let entry = by_h.entry(h).or_insert((e, -1.0, f32::INFINITY));
+        if edge_length_um[e] > entry.1 {
+            (entry.0, entry.1) = (e, edge_length_um[e]);
+        }
+        entry.2 = entry.2.min(edge_t[e]);
+    }
+    let hyperedge_anchors = by_h
+        .into_iter()
+        .map(|(h, (e, _, t))| (h, arcs.points[(arcs.offsets[e] + arcs.offsets[e + 1]) / 2], t))
+        .collect();
+
     Ok(Store {
         arcs,
         vertex_t,
         timepoints,
         quality,
+        node_ids,
+        node_pos,
+        node_index,
+        edge_nodes,
+        edge_length_um,
+        edge_t,
+        hyperedge,
+        width,
+        node_t,
+        hyperedge_anchors,
     })
+}
+
+fn polyline_lengths(arcs: &Arcs) -> Vec<f32> {
+    arcs.offsets
+        .windows(2)
+        .map(|e| {
+            arcs.points[e[0]..e[1]]
+                .windows(2)
+                .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+                .sum()
+        })
+        .collect()
+}
+
+/// Length-weighted mean width and standard error per edge; NaN widths are skipped.
+fn mean_widths(n_edges: usize, segments: &[WidthSegment]) -> Result<Vec<Option<(f32, f32)>>, String> {
+    let mut sums = vec![(0.0_f64, 0.0_f64, 0.0_f64); n_edges];
+    for seg in segments {
+        let sum = usize::try_from(seg.edge_id)
+            .ok()
+            .and_then(|e| sums.get_mut(e))
+            .ok_or("/edge_width_segments names an edge out of range")?;
+        let len = (seg.s_end_um - seg.s_start_um).max(0.0);
+        if seg.width_um.is_finite() && len > 0.0 {
+            *sum = (sum.0 + len * seg.width_um, sum.1 + len * seg.width_se_um, sum.2 + len);
+        }
+    }
+    Ok(sums
+        .into_iter()
+        .map(|(w, se, len)| (len > 0.0).then(|| ((w / len) as f32, (se / len) as f32)))
+        .collect())
+}
+
+impl Store {
+    pub fn n_edges(&self) -> usize {
+        self.arcs.n_edges()
+    }
+
+    /// Edges incident to node row `node`.
+    pub fn incident_edges(&self, node: usize) -> Vec<usize> {
+        let id = self.node_ids[node];
+        (0..self.edge_nodes.len())
+            .filter(|&e| self.edge_nodes[e].contains(&id))
+            .collect()
+    }
+
+    /// Edges of hyperedge `h`.
+    pub fn hyperedge_edges(&self, h: i64) -> Vec<usize> {
+        (0..self.hyperedge.len()).filter(|&e| self.hyperedge[e] == h).collect()
+    }
+
+    /// Nearest node within `radius` µm that has appeared by timepoint `t`.
+    pub fn pick_node(&self, at: [f32; 2], radius: f32, t: f32) -> Option<usize> {
+        nearest(
+            (0..self.node_pos.len()).filter(|&n| self.node_t[n] <= t),
+            |n| dist2(at, self.node_pos[n]),
+            radius,
+        )
+    }
+
+    /// Nearest edge within `radius` µm, counting only arc segments visible at timepoint `t`.
+    // ponytail: brute force over every segment (~1.4M, a few ms per click); grid index if it drags
+    pub fn pick_edge(&self, at: [f32; 2], radius: f32, t: f32) -> Option<usize> {
+        let (p, vt) = (&self.arcs.points, &self.vertex_t);
+        nearest(
+            0..self.n_edges(),
+            |e| {
+                let r = self.arcs.offsets[e]..self.arcs.offsets[e + 1];
+                r.clone()
+                    .zip(r.skip(1))
+                    .filter(|&(a, b)| vt[a].min(vt[b]) <= t)
+                    .map(|(a, b)| segment_dist2(at, p[a], p[b]))
+                    .fold(f32::INFINITY, f32::min)
+            },
+            radius,
+        )
+    }
+}
+
+fn nearest(items: impl Iterator<Item = usize>, d2: impl Fn(usize) -> f32, radius: f32) -> Option<usize> {
+    items
+        .map(|i| (i, d2(i)))
+        .filter(|&(_, d)| d <= radius * radius)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
+}
+
+fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
+}
+
+fn segment_dist2(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+    let s = if len2 > 0.0 {
+        (((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    dist2(p, [a[0] + s * ab[0], a[1] + s * ab[1]])
 }
 
 /// `/arc_time_runs` rows are `(edge_id, s_start_um, t_index)`, sorted by edge then `s`;
@@ -146,7 +367,24 @@ fn arcs_from_raw(offsets: &[i64], flat_points: &[f64]) -> Result<Arcs, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arcs_from_raw, vertex_t_from_runs};
+    use super::{WidthSegment, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs};
+
+    #[test]
+    fn widths_and_segment_distance() {
+        let seg = |edge_id, s_start_um, s_end_um, width_um| WidthSegment {
+            edge_id,
+            s_start_um,
+            s_end_um,
+            width_um,
+            width_se_um: 1.0,
+        };
+        let w = mean_widths(3, &[seg(0, 0.0, 10.0, 4.0), seg(0, 10.0, 40.0, 8.0), seg(1, 0.0, 5.0, f64::NAN)]).unwrap();
+        assert_eq!(w, [Some((7.0, 1.0)), None, None]);
+        assert!(mean_widths(1, &[seg(4, 0.0, 1.0, 1.0)]).is_err());
+
+        assert_eq!(segment_dist2([5.0, 3.0], [0.0, 0.0], [10.0, 0.0]), 9.0);
+        assert_eq!(segment_dist2([-4.0, 3.0], [0.0, 0.0], [10.0, 0.0]), 25.0);
+    }
 
     #[test]
     fn runs_label_vertices_by_arc_length() {

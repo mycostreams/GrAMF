@@ -32,7 +32,7 @@ impl Camera {
     }
 
     /// µm per physical pixel for a viewport `height_px` tall.
-    fn scale(&self, height_px: f32) -> f32 {
+    pub fn scale(&self, height_px: f32) -> f32 {
         2.0 * self.half_height / height_px
     }
 
@@ -40,6 +40,23 @@ impl Camera {
         self.center = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
         let half = ((max[1] - min[1]) / 2.0).max((max[0] - min[0]) / 2.0 / aspect_ratio);
         self.half_height = half.max(1.0) * 1.05;
+    }
+
+    /// World position (µm) under viewport pixel `px` of a viewport `size_px`.
+    pub fn screen_to_world(&self, px: [f32; 2], size_px: [f32; 2]) -> [f32; 2] {
+        let s = self.scale(size_px[1]);
+        [
+            self.center[0] + (px[0] - size_px[0] / 2.0) * s,
+            self.center[1] + (px[1] - size_px[1] / 2.0) * s,
+        ]
+    }
+
+    pub fn world_to_screen(&self, w: [f32; 2], size_px: [f32; 2]) -> [f32; 2] {
+        let s = self.scale(size_px[1]);
+        [
+            (w[0] - self.center[0]) / s + size_px[0] / 2.0,
+            (w[1] - self.center[1]) / s + size_px[1] / 2.0,
+        ]
     }
 
     /// Moves the map with a cursor drag of `(dx, dy)` physical pixels.
@@ -52,8 +69,7 @@ impl Camera {
     /// Zooms by `factor` (<1 zooms in), keeping the world point under `cursor` fixed.
     pub fn zoom(&mut self, factor: f32, cursor: [f32; 2], size_px: [f32; 2]) {
         let offset = [cursor[0] - size_px[0] / 2.0, cursor[1] - size_px[1] / 2.0];
-        let s = self.scale(size_px[1]);
-        let world = [self.center[0] + offset[0] * s, self.center[1] + offset[1] * s];
+        let world = self.screen_to_world(cursor, size_px);
         self.half_height *= factor;
         let s = self.scale(size_px[1]);
         self.center = [world[0] - offset[0] * s, world[1] - offset[1] * s];
@@ -162,14 +178,13 @@ mod tests {
         let size = [800.0, 600.0];
         let cursor = [700.0, 100.0];
         let mut cam = Camera { center: [5000.0, 2000.0], half_height: 300.0 };
-        let world = |c: &Camera| {
-            let s = 2.0 * c.half_height / size[1];
-            [c.center[0] + (cursor[0] - 400.0) * s, c.center[1] + (cursor[1] - 300.0) * s]
-        };
+        let world = |c: &Camera| c.screen_to_world(cursor, size);
         let before = world(&cam);
         cam.zoom(0.5, cursor, size);
         let after = world(&cam);
         assert!((before[0] - after[0]).abs() < 1e-3 && (before[1] - after[1]).abs() < 1e-3);
         assert_eq!(cam.half_height, 150.0);
+        let back = cam.world_to_screen(after, size);
+        assert!((back[0] - cursor[0]).abs() < 1e-2 && (back[1] - cursor[1]).abs() < 1e-2);
     }
 }

@@ -6,7 +6,6 @@ use crate::{
 
 /// Index value that ends one line strip and starts the next (primitive restart).
 const RESTART: u32 = u32::MAX;
-const EDGE_COLOR: [f32; 4] = [0.75, 0.9, 0.6, 1.0];
 
 /// GPU buffers for one loaded graph.
 struct GraphBuffers {
@@ -22,6 +21,8 @@ pub struct GraphRenderer {
     pub uniform: CameraUniformBinding,
     pub pipeline: wgpu::RenderPipeline,
     graph: Option<GraphBuffers>,
+    /// Selected edges, drawn again on top in the highlight colour.
+    selection: Option<GraphBuffers>,
 }
 
 impl GraphRenderer {
@@ -36,62 +37,33 @@ impl GraphRenderer {
             uniform,
             pipeline,
             graph: None,
+            selection: None,
         }
     }
 
     /// Uploads every arc as one line strip; replaces any previously loaded graph.
-    /// `vertex_t` is row-aligned with `arcs.points`.
-    pub fn set_arcs(&mut self, device: &wgpu::Device, arcs: &Arcs, vertex_t: &[f32]) {
-        let vertices: Vec<Vertex> = arcs
-            .points
-            .iter()
-            .zip(vertex_t)
-            .map(|(&[x, y], &t)| Vertex {
-                position: [x, y, 0.0, 1.0],
-                color: EDGE_COLOR,
-                t,
-            })
-            .collect();
-        let mut indices = Vec::with_capacity(arcs.points.len() + arcs.n_edges());
-        for edge in arcs.offsets.windows(2) {
-            indices.extend(edge[0] as u32..edge[1] as u32);
-            indices.push(RESTART);
-        }
+    /// `vertex_t` and `colours` are row-aligned with `arcs.points`. Replaces any previously
+    /// loaded graph.
+    pub fn set_arcs(&mut self, device: &wgpu::Device, arcs: &Arcs, vertex_t: &[f32], colours: &[[f32; 4]]) {
+        self.graph = Some(line_strips(device, arcs, vertex_t, 0..arcs.n_edges(), |v| colours[v]));
+        self.selection = None;
+    }
 
-        let buffer = |label, contents: &[u8], usage| {
-            wgpu::util::DeviceExt::create_buffer_init(
-                device,
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents,
-                    usage,
-                },
-            )
-        };
-        self.graph = Some(GraphBuffers {
-            vertex_buffer: buffer(
-                "Arc Vertex Buffer",
-                bytemuck::cast_slice(&vertices),
-                wgpu::BufferUsages::VERTEX,
-            ),
-            index_buffer: buffer(
-                "Arc Index Buffer",
-                bytemuck::cast_slice(&indices),
-                wgpu::BufferUsages::INDEX,
-            ),
-            index_count: indices.len() as u32,
+    /// Highlights `edges` (empty clears the selection).
+    pub fn set_selection(&mut self, device: &wgpu::Device, arcs: &Arcs, vertex_t: &[f32], edges: &[usize]) {
+        self.selection = (!edges.is_empty()).then(|| {
+            line_strips(device, arcs, vertex_t, edges.iter().copied(), |_| crate::colour::HIGHLIGHT)
         });
     }
 
     pub fn render<'rpass>(&'rpass self, renderpass: &mut wgpu::RenderPass<'rpass>) {
-        let Some(graph) = &self.graph else {
-            return;
-        };
         renderpass.set_pipeline(&self.pipeline);
         renderpass.set_bind_group(0, &self.uniform.bind_group, &[]);
-        renderpass.set_vertex_buffer(0, graph.vertex_buffer.slice(..));
-        renderpass.set_index_buffer(graph.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        renderpass.draw_indexed(0..graph.index_count, 0, 0..1);
+        for buffers in [&self.graph, &self.selection].into_iter().flatten() {
+            renderpass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+            renderpass.set_index_buffer(buffers.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            renderpass.draw_indexed(0..buffers.index_count, 0, 0..1);
+        }
     }
 
     /// Writes the current camera and timepoint to the uniform buffer.
@@ -142,7 +114,8 @@ impl GraphRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                // LessEqual: everything sits at z = 0, so later draws (the selection) win
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -164,5 +137,45 @@ impl GraphRenderer {
             multiview_mask: None,
             cache: None,
         })
+    }
+}
+
+/// One line strip per edge in `edges`, separated by primitive restarts.
+fn line_strips(
+    device: &wgpu::Device,
+    arcs: &Arcs,
+    vertex_t: &[f32],
+    edges: impl Iterator<Item = usize>,
+    colour: impl Fn(usize) -> [f32; 4],
+) -> GraphBuffers {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for e in edges {
+        for v in arcs.offsets[e]..arcs.offsets[e + 1] {
+            indices.push(vertices.len() as u32);
+            let [x, y] = arcs.points[v];
+            vertices.push(Vertex {
+                position: [x, y, 0.0, 1.0],
+                color: colour(v),
+                t: vertex_t[v],
+            });
+        }
+        indices.push(RESTART);
+    }
+
+    let buffer = |label, contents: &[u8], usage| {
+        wgpu::util::DeviceExt::create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            },
+        )
+    };
+    GraphBuffers {
+        vertex_buffer: buffer("Arc Vertex Buffer", bytemuck::cast_slice(&vertices), wgpu::BufferUsages::VERTEX),
+        index_buffer: buffer("Arc Index Buffer", bytemuck::cast_slice(&indices), wgpu::BufferUsages::INDEX),
+        index_count: indices.len() as u32,
     }
 }

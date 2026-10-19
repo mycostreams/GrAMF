@@ -9,11 +9,6 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    // Calculate the aspect ratio based on the current surface configuration
-    pub fn aspect_ratio(&self) -> f32 {
-        self.surface_config.width as f32 / self.surface_config.height.max(1) as f32
-    }
-
     // Resize the surface configuration and reconfigure the surface when the window size changes
     pub fn resize(&mut self, width: u32, height: u32) {
         self.surface_config.width = width;

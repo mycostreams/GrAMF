@@ -58,12 +58,45 @@ impl AppRenderer {
         }
     }
 
-    pub fn load_store(&mut self, store: &crate::store::Store) {
-        let arcs = &store.arcs;
-        self.graph_renderer
-            .set_arcs(&self.gpu.device, arcs, &store.vertex_t);
-        self.bounds = Some((arcs.min, arcs.max));
+    pub fn load_store(&mut self, store: &crate::store::Store, colours: &[[f32; 4]]) {
+        self.set_colours(store, colours);
+        self.bounds = Some((store.arcs.min, store.arcs.max));
         self.fit_pending = true;
+    }
+
+    /// Re-uploads the graph with new per-vertex colours (also clears the selection).
+    pub fn set_colours(&mut self, store: &crate::store::Store, colours: &[[f32; 4]]) {
+        self.graph_renderer
+            .set_arcs(&self.gpu.device, &store.arcs, &store.vertex_t, colours);
+    }
+
+    pub fn set_selection(&mut self, store: &crate::store::Store, edges: &[usize]) {
+        self.graph_renderer
+            .set_selection(&self.gpu.device, &store.arcs, &store.vertex_t, edges);
+    }
+
+    /// World position (µm) under window pixel `px`.
+    pub fn screen_to_world(&self, px: [f32; 2]) -> [f32; 2] {
+        let [x, y, w, h] = self.map_rect;
+        self.graph_renderer.camera.screen_to_world([px[0] - x, px[1] - y], [w, h])
+    }
+
+    /// Window pixel of world position `p` (µm).
+    pub fn world_to_screen(&self, p: [f32; 2]) -> [f32; 2] {
+        let [x, y, w, h] = self.map_rect;
+        let s = self.graph_renderer.camera.world_to_screen(p, [w, h]);
+        [s[0] + x, s[1] + y]
+    }
+
+    /// µm per window pixel.
+    pub fn um_per_px(&self) -> f32 {
+        self.graph_renderer.camera.scale(self.map_rect[3])
+    }
+
+    /// Visible world rectangle (µm): `(min, max)`.
+    pub fn visible_world(&self) -> ([f32; 2], [f32; 2]) {
+        let [x, y, w, h] = self.map_rect;
+        (self.screen_to_world([x, y]), self.screen_to_world([x + w, y + h]))
     }
 
     /// Clamped to the surface: egui can report a rect slightly past it while resizing.
