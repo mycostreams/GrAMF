@@ -2,7 +2,7 @@ use super::annotate::{self, AnnotationState, Choice};
 use super::dev_panel::{self, DevState};
 use super::export_dialog::{self, ExportDialog};
 use crate::annotations::{Op, Target};
-use crate::colour::ColourBy;
+use crate::colour::{Cmap, ColourBy};
 use crate::store::Store;
 use crate::time::{TimeAxis, TimeUnit};
 
@@ -79,6 +79,8 @@ pub enum Selection {
 
 pub struct Layers {
     pub colour_by: ColourBy,
+    /// Colormap for the continuous modes (t_first, width).
+    pub cmap: Cmap,
     pub node_ids: bool,
     pub hyperedge_ids: bool,
 }
@@ -87,6 +89,7 @@ impl Default for Layers {
     fn default() -> Self {
         Self {
             colour_by: ColourBy::Uniform,
+            cmap: Cmap::Viridis,
             node_ids: false,
             hyperedge_ids: false,
         }
@@ -241,10 +244,11 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                     ui.selectable_value(&mut layers.colour_by, by, by.name());
                 }
             });
-        actions.colour_changed = layers.colour_by != before;
+        let cmap_before = layers.cmap;
         if let Some(store) = store {
-            legend(ui, store, layers.colour_by, timeline);
+            legend(ui, store, layers, timeline);
         }
+        actions.colour_changed = layers.colour_by != before || layers.cmap != cmap_before;
         ui.checkbox(&mut layers.node_ids, "Node ids");
         ui.checkbox(&mut layers.hyperedge_ids, "Hyperedge ids");
         if (layers.node_ids || layers.hyperedge_ids) && labels.is_none() {
@@ -444,9 +448,10 @@ fn timeline_bar(ui: &mut egui::Ui, timeline: &mut Timeline) {
     });
 }
 
-/// Colour scale with its end values, for the continuous colour-by modes.
-fn legend(ui: &mut egui::Ui, store: &Store, by: ColourBy, timeline: Option<&Timeline>) {
-    let (lo, hi) = match by {
+/// Colour scale with its end values, for the continuous colour-by modes. Clicking the bar
+/// opens a menu of colormaps.
+fn legend(ui: &mut egui::Ui, store: &Store, layers: &mut Layers, timeline: Option<&Timeline>) {
+    let (lo, hi) = match layers.colour_by {
         ColourBy::TFirst => {
             let last = timeline.map_or(0, |t| t.axis.len().saturating_sub(1));
             ("frame 0".to_string(), format!("frame {last}"))
@@ -460,10 +465,34 @@ fn legend(ui: &mut egui::Ui, store: &Store, by: ColourBy, timeline: Option<&Time
         },
         _ => return,
     };
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(160.0), 10.0), egui::Sense::hover());
+    let size = egui::vec2(ui.available_width().min(160.0), 10.0);
+    let bar = colour_bar(ui, layers.cmap, size, egui::Sense::click())
+        .on_hover_text(format!("{} — click to change the colormap", layers.cmap.name()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    egui::Popup::menu(&bar).show(|ui| {
+        for cmap in Cmap::ALL {
+            let row = ui.horizontal(|ui| {
+                colour_bar(ui, cmap, egui::vec2(90.0, 10.0), egui::Sense::hover());
+                ui.selectable_label(layers.cmap == cmap, cmap.name())
+            });
+            if row.inner.clicked() || row.response.interact(egui::Sense::click()).clicked() {
+                layers.cmap = cmap;
+                ui.close();
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.small(lo);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.small(hi));
+    });
+}
+
+/// Paints `cmap` left to right into a new `size` rect.
+fn colour_bar(ui: &mut egui::Ui, cmap: Cmap, size: egui::Vec2, sense: egui::Sense) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(size, sense);
     const STEPS: usize = 32;
     for i in 0..STEPS {
-        let [r, g, b, _] = crate::colour::viridis(i as f32 / (STEPS - 1) as f32);
+        let [r, g, b, _] = cmap.sample(i as f32 / (STEPS - 1) as f32);
         let x0 = rect.left() + rect.width() * i as f32 / STEPS as f32;
         let x1 = rect.left() + rect.width() * (i + 1) as f32 / STEPS as f32;
         ui.painter().rect_filled(
@@ -472,8 +501,5 @@ fn legend(ui: &mut egui::Ui, store: &Store, by: ColourBy, timeline: Option<&Time
             egui::Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8),
         );
     }
-    ui.horizontal(|ui| {
-        ui.small(lo);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.small(hi));
-    });
+    response
 }

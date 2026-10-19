@@ -92,7 +92,7 @@ impl App {
             }
         };
         let n_timepoints = store.timepoints.len();
-        renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, n_timepoints));
+        renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, self.layers.cmap, n_timepoints));
         renderer.set_evidence(&store, &[]);
         self.selection = None;
         self.dev.reset_store();
@@ -172,7 +172,7 @@ impl App {
                             (e, a, b, ARC_SPAN)
                         } else {
                             let quality = if ev.score_semantic == "coverage" { a } else { 1.0 - a / ev.threshold };
-                            (e, f32::NEG_INFINITY, f32::INFINITY, crate::colour::viridis(quality))
+                            (e, f32::NEG_INFINITY, f32::INFINITY, crate::colour::Cmap::Viridis.sample(quality))
                         }
                     })
                     .collect();
@@ -355,7 +355,7 @@ impl App {
                 let colours = if self.dev.evidence_on {
                     vec![DIM; store.arcs.points.len()]
                 } else {
-                    vertex_colours(store, self.layers.colour_by, store.timepoints.len())
+                    vertex_colours(store, self.layers.colour_by, self.layers.cmap, store.timepoints.len())
                 };
                 renderer.set_colours(store, &colours);
                 if !self.dev.evidence_on {
