@@ -64,6 +64,8 @@ impl Camera {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    /// `x` = current timepoint index; geometry appearing later is hidden. `yzw` unused.
+    time: [f32; 4],
 }
 
 impl CameraUniform {
@@ -71,17 +73,22 @@ impl CameraUniform {
         use cgmath::SquareMatrix;
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
+            time: [f32::MAX, 0.0, 0.0, 0.0],
         }
     }
     pub fn from_camera(camera: &Camera, aspect_ratio: f32) -> Self {
-        let view_proj = camera.ortho_view_matrix(aspect_ratio);
         Self {
-            view_proj: view_proj.into(),
+            view_proj: camera.ortho_view_matrix(aspect_ratio).into(),
+            time: [f32::MAX, 0.0, 0.0, 0.0],
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera, aspect_ratio: f32) {
         self.view_proj = camera.ortho_view_matrix(aspect_ratio).into();
+    }
+
+    pub fn set_time(&mut self, t: f32) {
+        self.time[0] = t;
     }
 }
 

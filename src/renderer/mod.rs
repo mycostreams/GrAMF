@@ -18,6 +18,8 @@ pub struct AppRenderer {
     map_rect: [f32; 4],
     /// Fit once the map area is known (a store can load before the first UI frame).
     fit_pending: bool,
+    /// Current timepoint index; geometry appearing later is hidden.
+    pub time: f32,
 }
 
 impl AppRenderer {
@@ -52,11 +54,14 @@ impl AppRenderer {
             bounds: None,
             map_rect: [0.0, 0.0, width as f32, height as f32],
             fit_pending: false,
+            time: f32::MAX,
         }
     }
 
-    pub fn load_arcs(&mut self, arcs: &crate::store::Arcs) {
-        self.graph_renderer.set_arcs(&self.gpu.device, arcs);
+    pub fn load_store(&mut self, store: &crate::store::Store) {
+        let arcs = &store.arcs;
+        self.graph_renderer
+            .set_arcs(&self.gpu.device, arcs, &store.vertex_t);
         self.bounds = Some((arcs.min, arcs.max));
         self.fit_pending = true;
     }
@@ -114,7 +119,7 @@ impl AppRenderer {
             self.fit();
         }
         self.graph_renderer
-            .update(&self.gpu.queue, self.map_aspect());
+            .update(&self.gpu.queue, self.map_aspect(), self.time);
 
         for (id, image_delta) in &textures_delta.set {
             self.egui_renderer

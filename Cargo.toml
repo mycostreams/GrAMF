@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
+calamine = "0.37.0"
 cgmath = "0.18.0"
+chrono = "0.4.45"
 egui = "0.34"
 egui-wgpu = { version = "0.34", features = ["winit"] }
 egui-winit = "0.34.2"

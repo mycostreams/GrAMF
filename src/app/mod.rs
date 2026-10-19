@@ -1,6 +1,8 @@
 mod ui;
 
+use crate::registry;
 use crate::renderer::AppRenderer;
+use crate::time::TimeAxis;
 use egui_winit::State;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,6 +27,7 @@ pub struct App {
     status: String,
     cursor: PhysicalPosition<f64>,
     dragging: bool,
+    timeline: Option<ui::Timeline>,
 }
 
 impl App {
@@ -39,14 +42,33 @@ impl App {
         let (Some(renderer), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else {
             return;
         };
-        match crate::store::read_arcs(path) {
-            Ok(arcs) => {
-                renderer.load_arcs(&arcs);
-                self.status = format!("{} edges · {} points", arcs.n_edges(), arcs.points.len());
-                window.set_title(&format!("GrAMF — {}", path.display()));
+        let store = match crate::store::read_store(path) {
+            Ok(store) => store,
+            Err(e) => {
+                self.status = format!("Could not open {}: {e}", path.display());
+                return;
             }
-            Err(e) => self.status = format!("Could not open {}: {e}", path.display()),
-        }
+        };
+        renderer.load_store(&store);
+        window.set_title(&format!("GrAMF — {}", path.display()));
+
+        let candidates = registry::plate_candidates(path);
+        let plate = registry::default_dir().and_then(|dir| registry::lookup(&dir, &candidates));
+        let plate_status = match &plate {
+            Some(p) => p.ui.clone(),
+            None if candidates.is_empty() => "plate id not found in path".into(),
+            None => format!("{} not in registry", candidates[0]),
+        };
+        self.status = format!("{plate_status} · {} edges", store.arcs.n_edges());
+
+        self.timeline = TimeAxis::new(
+            store.timepoints,
+            store.quality,
+            plate.as_ref().and_then(|p| p.inoculation),
+            plate.as_ref().and_then(|p| p.crossed),
+        )
+        .map(ui::Timeline::new);
+        renderer.time = self.timeline.as_ref().map_or(f32::MAX, |t| t.index as f32);
     }
 }
 
@@ -147,6 +169,16 @@ impl ApplicationHandler for App {
             } => match (key_code, state) {
                 (winit::keyboard::KeyCode::Escape, _) => event_loop.exit(),
                 (winit::keyboard::KeyCode::Home, ElementState::Pressed) => renderer.fit(),
+                (key, ElementState::Pressed) => {
+                    if let Some(timeline) = self.timeline.as_mut() {
+                        match key {
+                            winit::keyboard::KeyCode::ArrowLeft => timeline.step(-1),
+                            winit::keyboard::KeyCode::ArrowRight => timeline.step(1),
+                            winit::keyboard::KeyCode::Space => timeline.toggle_play(),
+                            _ => (),
+                        }
+                    }
+                }
                 _ => (),
             },
             WindowEvent::MouseInput {
@@ -198,6 +230,9 @@ impl ApplicationHandler for App {
                 //take gui input
                 let gui_input = gui_state.take_egui_input(window);
                 let mut actions = ui::UiActions::default();
+                if let Some(timeline) = self.timeline.as_mut() {
+                    timeline.advance(delta_time.as_secs_f32());
+                }
 
                 //TODO: move this title to a constant or config file
                 let title = "GrAMF - Graphs for Arbuscular Mycorrhizal Fungi";
@@ -212,7 +247,7 @@ impl ApplicationHandler for App {
                     ..
                 } = gui_state.egui_ctx().run_ui(gui_input, |ui| {
                     // Build the UI using the `build_ui` function defined in the `ui` module
-                    actions = ui::build_ui(ui, title, &self.status);
+                    actions = ui::build_ui(ui, title, &self.status, self.timeline.as_mut());
                 });
 
                 // Handle any platform output from egui (e.g., opening URLs, copying to clipboard, etc.)
@@ -232,6 +267,10 @@ impl ApplicationHandler for App {
                         pixels_per_point,
                     }
                 };
+
+                if let Some(timeline) = &self.timeline {
+                    renderer.time = timeline.index as f32;
+                }
 
                 // Map area must be known before rendering (fit uses its aspect)
                 if let Some(r) = actions.map_rect.map(|r| r * pixels_per_point) {

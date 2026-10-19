@@ -40,13 +40,16 @@ impl GraphRenderer {
     }
 
     /// Uploads every arc as one line strip; replaces any previously loaded graph.
-    pub fn set_arcs(&mut self, device: &wgpu::Device, arcs: &Arcs) {
+    /// `vertex_t` is row-aligned with `arcs.points`.
+    pub fn set_arcs(&mut self, device: &wgpu::Device, arcs: &Arcs, vertex_t: &[f32]) {
         let vertices: Vec<Vertex> = arcs
             .points
             .iter()
-            .map(|&[x, y]| Vertex {
+            .zip(vertex_t)
+            .map(|(&[x, y], &t)| Vertex {
                 position: [x, y, 0.0, 1.0],
                 color: EDGE_COLOR,
+                t,
             })
             .collect();
         let mut indices = Vec::with_capacity(arcs.points.len() + arcs.n_edges());
@@ -91,9 +94,10 @@ impl GraphRenderer {
         renderpass.draw_indexed(0..graph.index_count, 0, 0..1);
     }
 
-    /// Writes the current camera to its uniform buffer.
-    pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32) {
+    /// Writes the current camera and timepoint to the uniform buffer.
+    pub fn update(&mut self, queue: &wgpu::Queue, aspect_ratio: f32, t: f32) {
         self.camera_raw.update_view_proj(&self.camera, aspect_ratio);
+        self.camera_raw.set_time(t);
         self.uniform.update_buffer(queue, 0, self.camera_raw);
     }
 
