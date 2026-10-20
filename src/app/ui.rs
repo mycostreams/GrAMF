@@ -207,6 +207,11 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                 });
 
                 ui.menu_button("View", |ui| {
+                    if ui.add(egui::Button::new("Reset Camera").shortcut_text("Home")).clicked() {
+                        actions.fit = true;
+                        ui.close();
+                    }
+                    ui.separator();
                     ui.checkbox(&mut dev.open, "Developer view");
                 });
 
@@ -273,9 +278,6 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("«").on_hover_text("hide Layers").clicked() {
                     layers.left_open = false;
-                }
-                if ui.small_button("Fit").on_hover_text("show the whole plate (Home)").clicked() {
-                    actions.fit = true;
                 }
             });
         });

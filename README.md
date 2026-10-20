@@ -42,7 +42,7 @@ to point elsewhere.
 | | |
 |---|---|
 | File > Open store… | pick a `stg_store.h5` |
-| drag (right-drag with Box select) / scroll / Home or Fit | pan / zoom at the cursor / fit the plate |
+| drag (right-drag with Box select) / scroll / Home or View > Reset Camera | pan / zoom at the cursor / fit the plate |
 | ← → / Space | previous / next timepoint / play |
 | V B X M R E | tools: select, box select, exclude, merge duplicate, root, add edge |
 | Esc | cancel a tool step, else clear the selection |
