@@ -55,6 +55,11 @@ Your annotations are saved as `annotations.<your name>.h5` next to the store; co
 files there show as extra layers. Trails (T) follow the shortest path through the waypoints
 you click and are saved with your annotations.
 
+**Video registration** (in progress, replacing `registrator`): the second workflow button lists
+the plate's video runs from a `polyflow_analysis` folder beside the store (or one you choose),
+grouped into sessions, with a stage scatter and a run slider that moves the STG to the run's
+time. Placement, matching and corrections follow (DESIGN.md §6, R3–R6).
+
 Settings (⌘, on macOS, File > Settings… elsewhere) hold your author name, the plate registry
 folder and the video-registration session gap; they live in `~/.gramf/settings`.
 

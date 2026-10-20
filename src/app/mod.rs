@@ -3,6 +3,7 @@ mod dev_panel;
 mod export_dialog;
 #[cfg(target_os = "macos")]
 mod native_menu;
+mod registration;
 mod settings_window;
 mod ui;
 
@@ -57,6 +58,9 @@ pub struct App {
     dev: dev_panel::DevState,
     settings: crate::settings::Settings,
     settings_window: settings_window::SettingsWindow,
+    workflow: registration::Workflow,
+    /// The open plate's video runs (Video registration workflow), when found.
+    reg: Option<registration::Registration>,
     /// Routed trails per (author, name): the waypoints and added-edge count they were routed
     /// with, and the node path (`None`: no path).
     trail_routes: HashMap<(String, String), (Vec<i64>, usize, Option<Vec<i64>>)>,
@@ -116,9 +120,34 @@ impl App {
         (plate, status, name)
     }
 
+    /// Asks for a `polyflow_analysis` folder and lists its runs.
+    fn choose_videos(&mut self) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let start = self.store_path.as_ref().and_then(|p| p.parent()).map(Path::to_path_buf);
+        let mut dialog = rfd::FileDialog::new().set_title("Folder with the plate's video runs (polyflow_analysis)");
+        if let Some(dir) = start {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(dir) = dialog.pick_folder() else {
+            return;
+        };
+        match crate::videos::scan(&dir) {
+            Ok(v) if !v.positions.is_empty() => {
+                self.reg = Some(registration::Registration::new(v, self.settings.session_gap_minutes, store));
+            }
+            Ok(_) => self.status = format!("No video runs in {}", dir.display()),
+            Err(e) => self.status = format!("Could not read {}: {e}", dir.display()),
+        }
+    }
+
     /// Applies saved settings: author switch, registry re-lookup, persisted to disk.
     fn apply_settings(&mut self, new: crate::settings::Settings) {
         let old = std::mem::replace(&mut self.settings, new);
+        if let Some(reg) = self.reg.as_mut() {
+            reg.regroup(self.settings.session_gap_minutes);
+        }
         if let Err(e) = self.settings.save() {
             self.status = format!("Could not save settings: {e}");
         }
@@ -200,6 +229,15 @@ impl App {
         }
         self.annot = Some(annot);
         self.store_path = Some(path.to_path_buf());
+        // Video runs beside the store (or one folder up, for <plate>/data/stg_store.h5).
+        self.reg = path
+            .ancestors()
+            .skip(1)
+            .take(2)
+            .map(|dir| dir.join("polyflow_analysis"))
+            .find(|dir| dir.is_dir())
+            .and_then(|dir| crate::videos::scan(&dir).ok())
+            .map(|videos| registration::Registration::new(videos, self.settings.session_gap_minutes, &store));
         self.store = Some(store);
         self.dev.timings.annotations_ms = ms(started);
     }
@@ -580,6 +618,9 @@ impl App {
         }
         if actions.export {
             self.export_tables();
+        }
+        if actions.choose_videos {
+            self.choose_videos();
         }
         self.raw_wanted = actions.raw_wanted;
         if let (true, Some(path)) = (actions.reveal, self.reveal.as_ref()) {
@@ -1067,6 +1108,8 @@ impl ApplicationHandler for App {
                             settings_window: &mut self.settings_window,
                             unreachable_trails: &unreachable_trails,
                             map_texts: &map_texts,
+                            workflow: &mut self.workflow,
+                            reg: self.reg.as_mut(),
                         },
                     );
                 });
@@ -1089,6 +1132,14 @@ impl ApplicationHandler for App {
                     }
                 };
 
+                // In registration the STG time follows the selected run.
+                if let (registration::Workflow::Registration, Some(reg), Some(timeline)) =
+                    (self.workflow, self.reg.as_ref(), self.timeline.as_mut())
+                {
+                    if let Some(f) = reg.selected_run_utc().and_then(|t| crate::videos::stg_frame(t, &timeline.axis.timepoints)) {
+                        timeline.index = f;
+                    }
+                }
                 if let Some(timeline) = &self.timeline {
                     renderer.time = timeline.index as f32;
                 }
