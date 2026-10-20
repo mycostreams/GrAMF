@@ -199,7 +199,16 @@ Only implemented workflows get a button; v1 ships with one, so the switcher appe
   edited (always the user's own), checkbox = visible.
 - Node and hyperedge ids are always available (layer toggles + inspector), not dev-only.
 - View > Developer adds a bottom dock: store inspector, health checks, raw rows, timings.
-- Keys: ←/→ step frame, Space play, V/X/M/R/E tools, Esc cancels a tool step or clears the
+- Box select (B): drag a box to select edges (scope for export); right-drag pans with any tool.
+- Node tools (Root, Add edge) draw nodes, ring the one under the cursor (10 px snap) and, while
+  adding an edge, show a rubber band from the first node.
+- Lines are screen-space quads: thickness in px, optionally following each edge's width at the
+  current timepoint (`/edge_width_timesteps`: seg estimate, else legacy, carried forward).
+  Colour by width also follows the current timepoint; the scale is the 5-95 % range of all
+  per-timestep widths, so colours compare across frames.
+- Both side panels collapse (« / »); raw rows for an edge are a section of the inspector.
+- Frames with quality weight 0 are labelled "faulty frame".
+- Keys: ←/→ step frame, Space play, V/B/X/M/R/E tools, Esc cancels a tool step or clears the
   selection, Home fit, Cmd/Ctrl+S save, Cmd/Ctrl+Z / Shift+Z,
   Cmd/Ctrl+1/2/3 switch workflow.
 

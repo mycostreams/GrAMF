@@ -41,13 +41,15 @@ to point elsewhere.
 
 | | |
 |---|---|
-| File > Open store… | pick a `stg_store.h5` |
-| drag / scroll / Home | pan / zoom at the cursor / fit the plate |
+| File > Open store… | pick a `stg_store.h5` (on macOS File / Edit / View are in the screen's menu bar) |
+| drag (right-drag with Box select) / scroll / Home or View > Reset Camera | pan / zoom at the cursor / fit the plate |
 | ← → / Space | previous / next timepoint / play |
-| V X M R E | tools: select, exclude, merge duplicate, root, add edge |
+| V B X M R E | tools: select, box select, exclude, merge duplicate, root, add edge |
 | Esc | cancel a tool step, else clear the selection |
 | Cmd/Ctrl+S, +Z, +Shift+Z | save annotations, undo, redo |
-| File > Export tables… | CSVs (+ README) for the plate, the view, or the selection |
+| File > Export tables… | CSVs (+ README) for the plate, the view, or the selection (incl. a box) |
+| Layers: lines by width | line thickness follows each edge's width at the current timepoint |
+| « / » | hide or show the side panels |
 
 Your annotations are saved as `annotations.<your name>.h5` next to the store; colleagues'
 files there show as extra layers. The name comes from `~/.gramf/author` (else your login)

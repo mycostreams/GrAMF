@@ -1,6 +1,8 @@
 mod annotate;
 mod dev_panel;
 mod export_dialog;
+#[cfg(target_os = "macos")]
+mod native_menu;
 mod ui;
 
 use crate::annotations::{self, AddedEdge, Annotations, Op};
@@ -51,7 +53,20 @@ pub struct App {
     /// Registry UI of the open plate, else the id found in its path; names export folders.
     plate: String,
     dev: dev_panel::DevState,
+    /// Raw rows for an edge, loaded while the inspector's Raw rows section is open.
+    raw: Option<(usize, Vec<crate::devtools::RawTable>)>,
+    raw_wanted: bool,
+    /// Box select: world corner where the drag started, and the edges of the last box.
+    box_start: Option<[f32; 2]>,
+    boxed: Vec<usize>,
+    /// A file the status line offers to show in Finder / Explorer.
+    reveal: Option<PathBuf>,
+    /// What the per-edge style table was last built for: (timepoint, colour mode, scale).
+    style_key: Option<(Option<usize>, crate::colour::ColourBy, crate::colour::Scale)>,
+    reference_width: f32,
     update_check: Option<std::sync::mpsc::Receiver<String>>,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<native_menu::NativeMenu>,
     update: Option<String>,
 }
 
@@ -59,8 +74,12 @@ pub struct App {
 const DIM: [f32; 4] = [0.22, 0.22, 0.22, 1.0];
 const ARC_SPAN: [f32; 4] = [0.2, 0.9, 1.0, 1.0];
 
-/// Click tolerance and the most id labels drawn at once.
+/// Click tolerance (larger for node tools: nodes are small targets) and the most id labels
+/// drawn at once.
 const PICK_RADIUS_PX: f32 = 6.0;
+const NODE_PICK_RADIUS_PX: f32 = 10.0;
+/// Node tools draw every node in view up to this many.
+const MAX_NODE_DOTS: usize = 6000;
 const MAX_LABELS: usize = 1500;
 
 impl App {
@@ -83,6 +102,16 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        self.reveal = None;
+        // Dropbox online-only files are 0-byte placeholders that reading does not download.
+        if std::fs::metadata(path).is_ok_and(|m| m.len() == 0) {
+            self.status = format!(
+                "{} is online-only in Dropbox: make it available offline, then open it again",
+                path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())
+            );
+            self.reveal = Some(path.to_path_buf());
+            return;
+        }
         let started = Instant::now();
         let store = match crate::store::read_store(path) {
             Ok(store) => store,
@@ -92,10 +121,13 @@ impl App {
             }
         };
         let n_timepoints = store.timepoints.len();
-        renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, self.layers.cmap, n_timepoints));
+        renderer.load_store(&store, &vertex_colours(&store, self.layers.colour_by, self.layers.scale, n_timepoints));
         renderer.set_evidence(&store, &[]);
         self.selection = None;
         self.dev.reset_store();
+        self.raw = None;
+        self.style_key = None;
+        self.reference_width = crate::colour::reference_width(&store);
         self.dev.evidence_on = false;
         self.dev.timings.load_ms = ms(started);
         let started = Instant::now();
@@ -139,21 +171,20 @@ impl App {
             return;
         };
         let d = &mut self.dev;
-        if d.open && d.datasets.is_none() {
-            let datasets = crate::devtools::inspect(path);
-            if let Ok(list) = &datasets {
-                let annotations: Vec<&Annotations> = self
-                    .annot
-                    .iter()
-                    .flat_map(|st| std::iter::once(&st.own).chain(st.others.iter().map(|(a, _)| a)))
-                    .collect();
-                d.health = crate::devtools::health(path, store, list, &annotations);
-            }
-            d.datasets = Some(datasets);
+        if (d.open || self.raw_wanted) && d.datasets.is_none() {
+            d.datasets = Some(crate::devtools::inspect(path));
         }
-        if let (true, Some(ui::Selection::Edge(e)), Some(Ok(list))) = (d.open, self.selection, &d.datasets) {
-            if d.raw.as_ref().map(|r| r.0) != Some(e) {
-                d.raw = Some((e, crate::devtools::raw_rows(path, list, store.n_edges(), e)));
+        if let (true, true, Some(Ok(list))) = (d.open, d.health.is_empty(), &d.datasets) {
+            let annotations: Vec<&Annotations> = self
+                .annot
+                .iter()
+                .flat_map(|st| std::iter::once(&st.own).chain(st.others.iter().map(|(a, _)| a)))
+                .collect();
+            d.health = crate::devtools::health(path, store, list, &annotations);
+        }
+        if let (true, Some(ui::Selection::Edge(e)), Some(Ok(list))) = (self.raw_wanted, self.selection, &d.datasets) {
+            if self.raw.as_ref().map(|r| r.0) != Some(e) {
+                self.raw = Some((e, crate::devtools::raw_rows(path, list, store.n_edges(), e)));
             }
         }
         let (Some(renderer), Some(timeline)) = (self.renderer.as_mut(), self.timeline.as_ref()) else {
@@ -224,6 +255,7 @@ impl App {
                 Some(ui::Selection::Node(n)) => (store.incident_edges(n), format!("edges of node {}", store.node_ids[n])),
                 Some(ui::Selection::Hyperedge(h)) => (store.hyperedge_edges(h), format!("hyperedge {h}")),
                 Some(ui::Selection::Added(id)) => (vec![], format!("added edge {id}")),
+                Some(ui::Selection::Box) => (self.boxed.clone(), format!("box selection of {} edges", self.boxed.len())),
                 None => (vec![], "empty selection".into()),
             },
         };
@@ -257,6 +289,39 @@ impl App {
         self.dev.timings.export_ms = ms(started);
     }
 
+    /// Quits, or first asks what to do with unsaved annotations.
+    fn request_quit(&mut self) {
+        if self.dirty() {
+            self.confirm = Some(Pending::Quit);
+        } else {
+            self.quit = true;
+        }
+    }
+
+    /// Acts on the macOS menu bar.
+    #[cfg(target_os = "macos")]
+    fn handle_native_menu(&mut self) {
+        use native_menu::Command;
+        for command in native_menu::NativeMenu::poll() {
+            let mut actions = ui::UiActions::default();
+            match command {
+                Command::Open => actions.open = true,
+                Command::Save => actions.save = true,
+                Command::Export => self.export.open = self.store.is_some(),
+                Command::Undo => actions.undo = true,
+                Command::Redo => actions.redo = true,
+                Command::ResetCamera => actions.fit = true,
+                Command::Developer => self.dev.open = !self.dev.open,
+                Command::Quit => self.request_quit(),
+            }
+            self.apply(actions);
+        }
+        let (store_open, developer) = (self.store.is_some(), self.dev.open);
+        if let Some(menu) = self.native_menu.as_mut() {
+            menu.sync(store_open, developer);
+        }
+    }
+
     /// Carries out what waited on the unsaved-annotations prompt.
     fn proceed(&mut self, pending: Pending) {
         if let Some(st) = self.annot.as_mut() {
@@ -277,6 +342,7 @@ impl App {
             Some(ui::Selection::Edge(e)) => vec![e],
             Some(ui::Selection::Node(n)) => store.incident_edges(n),
             Some(ui::Selection::Hyperedge(h)) => store.hyperedge_edges(h),
+            Some(ui::Selection::Box) => self.boxed.clone(),
             Some(ui::Selection::Added(_)) | None => vec![], // the overlay highlights added edges
         };
         renderer.set_selection(store, &edges);
@@ -296,12 +362,14 @@ impl App {
         };
         let at = renderer.screen_to_world(px);
         let radius = PICK_RADIUS_PX * renderer.um_per_px();
+        let node_radius = NODE_PICK_RADIUS_PX * renderer.um_per_px();
         let t = renderer.time;
-        let node = || store.pick_node(at, radius, t);
+        let node = || store.pick_node(at, if st.tool.needs_nodes() { node_radius } else { radius }, t);
         let edge = || store.pick_edge(at, radius, t);
 
         let mut op = None;
         let selection = match st.tool {
+            Tool::BoxSelect => return, // boxes are drawn by dragging; a plain click does nothing
             Tool::Select => node()
                 .map(ui::Selection::Node)
                 .or_else(|| pick_added(store, st, at, radius).map(ui::Selection::Added))
@@ -349,13 +417,32 @@ impl App {
         }
     }
 
+    /// Selects the edges with a vertex inside the box `a`–`b` (µm) that have appeared by now.
+    fn box_select(&mut self, a: [f32; 2], b: [f32; 2]) {
+        let (Some(store), Some(renderer)) = (self.store.as_ref(), self.renderer.as_ref()) else {
+            return;
+        };
+        let (min, max) = ([a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]);
+        let t = renderer.time;
+        let (p, vt) = (&store.arcs.points, &store.vertex_t);
+        self.boxed = (0..store.n_edges())
+            .filter(|&e| {
+                (store.arcs.offsets[e]..store.arcs.offsets[e + 1]).any(|v| {
+                    vt[v] <= t && p[v][0] >= min[0] && p[v][0] <= max[0] && p[v][1] >= min[1] && p[v][1] <= max[1]
+                })
+            })
+            .collect();
+        let selection = (!self.boxed.is_empty()).then_some(ui::Selection::Box);
+        self.select(selection);
+    }
+
     fn apply(&mut self, actions: ui::UiActions) {
         if actions.colour_changed || actions.evidence_toggled {
             if let (Some(renderer), Some(store)) = (self.renderer.as_mut(), self.store.as_ref()) {
                 let colours = if self.dev.evidence_on {
                     vec![DIM; store.arcs.points.len()]
                 } else {
-                    vertex_colours(store, self.layers.colour_by, self.layers.cmap, store.timepoints.len())
+                    vertex_colours(store, self.layers.colour_by, self.layers.scale, store.timepoints.len())
                 };
                 renderer.set_colours(store, &colours);
                 if !self.dev.evidence_on {
@@ -402,11 +489,34 @@ impl App {
         if actions.export {
             self.export_tables();
         }
+        self.raw_wanted = actions.raw_wanted;
+        if let (true, Some(path)) = (actions.reveal, self.reveal.as_ref()) {
+            reveal_in_file_manager(path);
+        }
+        if actions.fit {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.fit();
+            }
+        }
         if actions.open {
             self.pending_open = rfd::FileDialog::new()
                 .add_filter("STG store", &["h5"])
                 .pick_file();
         }
+    }
+}
+
+/// Shows `path` selected in Finder / Explorer (its folder elsewhere).
+fn reveal_in_file_manager(path: &Path) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg("-R").arg(path).spawn()
+    } else if cfg!(windows) {
+        std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn()
+    };
+    if let Err(e) = result {
+        log::warn!("could not reveal {}: {e}", path.display());
     }
 }
 
@@ -446,6 +556,60 @@ fn pick_added(store: &Store, st: &AnnotationState, at: [f32; 2], radius: f32) ->
         .filter(|&(_, d)| d <= radius * radius)
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(id, _)| id)
+}
+
+/// Feedback for the current tool, in points: node dots and the node under the cursor for node
+/// tools, a rubber band from the first node while adding an edge, and the box being dragged.
+fn tool_overlay(
+    store: &Store,
+    st: &AnnotationState,
+    renderer: &AppRenderer,
+    ppp: f32,
+    cursor: [f32; 2],
+    box_start: Option<[f32; 2]>,
+) -> Vec<egui::Shape> {
+    use egui::{Color32, Shape, Stroke};
+    let to_pt = |p: [f32; 2]| {
+        let [x, y] = renderer.world_to_screen(p);
+        egui::pos2(x / ppp, y / ppp)
+    };
+    let cursor_pt = egui::pos2(cursor[0] / ppp, cursor[1] / ppp);
+    let mut shapes = vec![];
+    let t = renderer.time;
+
+    if st.tool.needs_nodes() {
+        let (min, max) = renderer.visible_world();
+        let visible: Vec<usize> = (0..store.node_pos.len())
+            .filter(|&n| store.node_t[n] <= t)
+            .filter(|&n| {
+                let p = store.node_pos[n];
+                p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1]
+            })
+            .take(MAX_NODE_DOTS + 1)
+            .collect();
+        if visible.len() <= MAX_NODE_DOTS {
+            let dot = Color32::from_rgba_unmultiplied(220, 220, 220, 160);
+            shapes.extend(visible.iter().map(|&n| Shape::circle_filled(to_pt(store.node_pos[n]), 2.0, dot)));
+        }
+        let at = renderer.screen_to_world(cursor);
+        let hover = store.pick_node(at, NODE_PICK_RADIUS_PX * renderer.um_per_px(), t);
+        let accent = Color32::from_rgb(60, 210, 230);
+        if let Some(n) = hover {
+            shapes.push(Shape::circle_stroke(to_pt(store.node_pos[n]), 7.0, Stroke::new(2.0, accent)));
+        }
+        if let (Tool::AddEdge, Some(first)) = (st.tool, st.first) {
+            let from = to_pt(store.node_pos[first]);
+            let to = hover.map_or(cursor_pt, |n| to_pt(store.node_pos[n]));
+            shapes.push(Shape::circle_filled(from, 4.0, accent));
+            shapes.extend(Shape::dashed_line(&[from, to], Stroke::new(2.0, accent), 6.0, 4.0));
+        }
+    }
+    if let (Tool::BoxSelect, Some(start)) = (st.tool, box_start) {
+        let rect = egui::Rect::from_two_pos(to_pt(start), cursor_pt);
+        shapes.push(Shape::rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(60, 210, 230, 30)));
+        shapes.push(Shape::rect_stroke(rect, 0.0, Stroke::new(1.5, Color32::from_rgb(60, 210, 230)), egui::StrokeKind::Inside));
+    }
+    shapes
 }
 
 /// Id labels inside the view for items that have appeared by the current time, in points;
@@ -531,6 +695,10 @@ impl ApplicationHandler for App {
         if !self.initialized {
             env_logger::init();
             self.update_check = Some(crate::update::spawn_check());
+            #[cfg(target_os = "macos")]
+            {
+                self.native_menu = native_menu::NativeMenu::install();
+            }
         }
         let renderer =
             pollster::block_on(
@@ -572,7 +740,9 @@ impl ApplicationHandler for App {
         // Acted on after the event, once the borrows above are released
         let mut ui_actions = None;
         let mut click = None;
+        let mut boxed = None;
         let mut escape = false;
+        let mut close_requested = false;
 
         // Handle specific window events such as keyboard input, resizing, and redraw requests
         match event {
@@ -604,15 +774,32 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.dragging = state == ElementState::Pressed;
-                if self.dragging {
-                    self.press = Some(self.cursor);
-                } else if let Some(p) = self.press.take() {
-                    if (p.x - self.cursor.x).hypot(p.y - self.cursor.y) < 4.0 {
-                        click = Some([self.cursor.x as f32, self.cursor.y as f32]);
+                let boxing = self.annot.as_ref().is_some_and(|a| a.tool == Tool::BoxSelect);
+                let cursor = [self.cursor.x as f32, self.cursor.y as f32];
+                let pressed = state == ElementState::Pressed;
+                if boxing {
+                    if pressed {
+                        self.box_start = Some(renderer.screen_to_world(cursor));
+                    } else if let Some(start) = self.box_start.take() {
+                        boxed = Some((start, renderer.screen_to_world(cursor)));
+                    }
+                } else {
+                    self.dragging = pressed;
+                    if pressed {
+                        self.press = Some(self.cursor);
+                    } else if let Some(p) = self.press.take() {
+                        if (p.x - self.cursor.x).hypot(p.y - self.cursor.y) < 4.0 {
+                            click = Some(cursor);
+                        }
                     }
                 }
             }
+            // Right-drag pans with any tool (left-drag draws boxes with Box select).
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Right,
+                ..
+            } => self.dragging = state == ElementState::Pressed,
             WindowEvent::CursorMoved { position, .. } => {
                 if self.dragging {
                     let (dx, dy) = (position.x - self.cursor.x, position.y - self.cursor.y);
@@ -644,13 +831,7 @@ impl ApplicationHandler for App {
                 let scale_factor = window.scale_factor() as f32;
                 gui_state.egui_ctx().set_pixels_per_point(scale_factor);
             }
-            WindowEvent::CloseRequested => {
-                if self.annot.as_ref().is_some_and(|a| a.own.dirty) {
-                    self.confirm = Some(Pending::Quit);
-                } else {
-                    event_loop.exit();
-                }
-            }
+            WindowEvent::CloseRequested => close_requested = true,
             WindowEvent::RedrawRequested => {
                 // Get time delta sice last draw
                 let now = Instant::now();
@@ -679,6 +860,11 @@ impl ApplicationHandler for App {
                     }),
                     _ => vec![],
                 };
+                let mut overlay = overlay;
+                if let (Some(store), Some(st)) = (self.store.as_ref(), self.annot.as_ref()) {
+                    let cursor = [self.cursor.x as f32, self.cursor.y as f32];
+                    overlay.extend(tool_overlay(store, st, renderer, ppp, cursor, self.box_start));
+                }
                 if let Some(timeline) = self.timeline.as_mut() {
                     timeline.advance(delta_time.as_secs_f32());
                 }
@@ -712,6 +898,9 @@ impl ApplicationHandler for App {
                             export: &mut self.export,
                             dev: &mut self.dev,
                             update: self.update.as_deref(),
+                            raw: self.raw.as_ref(),
+                            boxed: &self.boxed,
+                            reveal: self.reveal.is_some(),
                         },
                     );
                 });
@@ -737,6 +926,19 @@ impl ApplicationHandler for App {
                 if let Some(timeline) = &self.timeline {
                     renderer.time = timeline.index as f32;
                 }
+                if let Some(store) = self.store.as_ref() {
+                    let key = (self.timeline.as_ref().map(|t| t.index), self.layers.colour_by, self.layers.scale);
+                    if self.style_key != Some(key) {
+                        renderer.set_edge_styles(&crate::colour::edge_styles(store, key.0, key.2));
+                        self.style_key = Some(key);
+                    }
+                    renderer.line = crate::renderer::LineStyle {
+                        base_px: self.layers.line_px,
+                        by_width: self.layers.line_by_width,
+                        edge_colour: self.layers.colour_by == crate::colour::ColourBy::Width,
+                        reference_width_um: self.reference_width,
+                    };
+                }
 
                 // Map area must be known before rendering (fit uses its aspect)
                 if let Some(r) = actions.map_rect.map(|r| r * pixels_per_point) {
@@ -761,6 +963,7 @@ impl ApplicationHandler for App {
         window.request_redraw();
 
         if escape {
+            self.box_start = None;
             let cancelled_step = self.annot.as_mut().and_then(|a| a.first.take()).is_some();
             if !cancelled_step {
                 self.select(None);
@@ -769,9 +972,17 @@ impl ApplicationHandler for App {
         if let Some(px) = click {
             self.pick(px);
         }
+        if let Some((a, b)) = boxed {
+            self.box_select(a, b);
+        }
         if let Some(actions) = ui_actions {
             self.apply(actions);
         }
+        if close_requested {
+            self.request_quit();
+        }
+        #[cfg(target_os = "macos")]
+        self.handle_native_menu();
         if let Some(path) = self.pending_open.take() {
             self.open_store(&path);
         }

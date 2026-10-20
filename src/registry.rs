@@ -48,7 +48,8 @@ pub fn plate_candidates(path: &Path) -> Vec<String> {
 }
 
 /// First match in `NOW_Experiments`, then `OLD_Experiments`, on the `UI` or `old UI`
-/// column. Columns are found by header name; Dropbox conflicted copies are skipped.
+/// column. Columns are found by header name (any capitalisation); Dropbox conflicted copies
+/// are skipped.
 pub fn lookup(dir: &Path, candidates: &[String]) -> Option<PlateRecord> {
     for sub in ["NOW_Experiments", "OLD_Experiments"] {
         let Ok(entries) = std::fs::read_dir(dir.join(sub)) else {
@@ -76,7 +77,8 @@ fn lookup_in_file(path: &Path, candidates: &[String]) -> Option<PlateRecord> {
     let range = workbook.worksheet_range_at(0)?.ok()?;
     let mut rows = range.rows();
     let header: Vec<String> = rows.next()?.iter().map(|c| c.to_string().trim().to_string()).collect();
-    let col = |name: &str| header.iter().position(|h| h == name);
+    // Sheets differ in capitalisation ("Start" vs "start"), so match case-insensitively.
+    let col = |name: &str| header.iter().position(|h| h.eq_ignore_ascii_case(name));
     let (ui, old_ui) = (col("UI"), col("old UI"));
     ui.or(old_ui)?;
 

@@ -1,5 +1,5 @@
-//! View > Developer: a bottom dock with the store inspector, health checks, raw rows for the
-//! selected edge, timings, and the matcher-evidence overlay toggle.
+//! View > Developer: a bottom dock with the store inspector, health checks, timings, and the
+//! matcher-evidence overlay toggle. (Raw rows for an edge live in the inspector.)
 
 use crate::devtools::{Check, DatasetInfo, Evidence, Level};
 
@@ -8,7 +8,6 @@ pub enum Tab {
     #[default]
     Store,
     Health,
-    RawRows,
     Timings,
 }
 
@@ -30,8 +29,6 @@ pub struct DevState {
     /// Filled lazily the first time the dock opens for a store.
     pub datasets: Option<Result<Vec<DatasetInfo>, String>>,
     pub health: Vec<Check>,
-    /// Raw rows and the edge they belong to.
-    pub raw: Option<(usize, Vec<(String, Vec<String>)>)>,
     pub evidence_on: bool,
     pub evidence: Option<Result<Evidence, String>>,
     /// Frame the evidence overlay was last built for.
@@ -44,7 +41,6 @@ impl DevState {
     pub fn reset_store(&mut self) {
         self.datasets = None;
         self.health.clear();
-        self.raw = None;
         self.evidence = None;
         self.evidence_frame = None;
     }
@@ -54,7 +50,7 @@ impl DevState {
 pub fn show(ui: &mut egui::Ui, d: &mut DevState) -> bool {
     let mut toggled = false;
     ui.horizontal(|ui| {
-        for (tab, name) in [(Tab::Store, "Store"), (Tab::Health, "Health"), (Tab::RawRows, "Raw rows"), (Tab::Timings, "Timings")] {
+        for (tab, name) in [(Tab::Store, "Store"), (Tab::Health, "Health"), (Tab::Timings, "Timings")] {
             ui.selectable_value(&mut d.tab, tab, name);
         }
         ui.separator();
@@ -115,24 +111,6 @@ pub fn show(ui: &mut egui::Ui, d: &mut DevState) -> bool {
                 });
             }
         }
-        Tab::RawRows => match &d.raw {
-            Some((e, rows)) => {
-                ui.strong(format!("Every row about edge {e}"));
-                for (name, lines) in rows {
-                    egui::CollapsingHeader::new(format!("{name}  ({} rows)", lines.len()))
-                        .id_salt(name)
-                        .default_open(lines.len() <= 3)
-                        .show(ui, |ui| {
-                            for line in lines {
-                                ui.monospace(line);
-                            }
-                        });
-                }
-            }
-            None => {
-                ui.label(egui::RichText::new("select an edge").weak());
-            }
-        },
         Tab::Timings => {
             let t = &d.timings;
             egui::Grid::new("timings").num_columns(2).show(ui, |ui| {

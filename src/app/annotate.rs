@@ -10,6 +10,7 @@ use std::path::PathBuf;
 pub enum Tool {
     #[default]
     Select,
+    BoxSelect,
     Exclude,
     Merge,
     Root,
@@ -17,11 +18,17 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 5] = [Tool::Select, Tool::Exclude, Tool::Merge, Tool::Root, Tool::AddEdge];
+    pub const ALL: [Tool; 6] = [Tool::Select, Tool::BoxSelect, Tool::Exclude, Tool::Merge, Tool::Root, Tool::AddEdge];
+
+    /// Tools that act on nodes: nodes are drawn and the one under the cursor highlighted.
+    pub fn needs_nodes(self) -> bool {
+        matches!(self, Tool::Root | Tool::AddEdge)
+    }
 
     fn name(self) -> &'static str {
         match self {
             Tool::Select => "Select",
+            Tool::BoxSelect => "Box select",
             Tool::Exclude => "Exclude",
             Tool::Merge => "Merge",
             Tool::Root => "Root",
@@ -32,6 +39,7 @@ impl Tool {
     pub fn key(self) -> egui::Key {
         match self {
             Tool::Select => egui::Key::V,
+            Tool::BoxSelect => egui::Key::B,
             Tool::Exclude => egui::Key::X,
             Tool::Merge => egui::Key::M,
             Tool::Root => egui::Key::R,
@@ -42,6 +50,7 @@ impl Tool {
     fn help(self) -> &'static str {
         match self {
             Tool::Select => "click an edge, node or added edge to inspect it",
+            Tool::BoxSelect => "drag a box to select edges, e.g. for export (right-drag pans)",
             Tool::Exclude => "click an edge to toggle excluded",
             Tool::Merge => "click the duplicate edge, then the edge it duplicates",
             Tool::Root => "click a node to toggle root",
@@ -108,8 +117,7 @@ pub fn save_author(name: &str) {
 pub fn toolbar(ui: &mut egui::Ui, st: &mut AnnotationState) {
     ui.horizontal(|ui| {
         for tool in Tool::ALL {
-            let label = format!("{} ({:?})", tool.name(), tool.key());
-            if ui.selectable_label(st.tool == tool, label).clicked() {
+            if ui.selectable_label(st.tool == tool, shortcut_label(ui, tool)).clicked() {
                 st.tool = tool;
                 st.first = None;
             }
@@ -122,6 +130,32 @@ pub fn toolbar(ui: &mut egui::Ui, st: &mut AnnotationState) {
         };
         ui.label(egui::RichText::new(hint).weak());
     });
+}
+
+/// The tool name with its shortcut letter underlined, or `Name (K)` when the name lacks it.
+fn shortcut_label(ui: &egui::Ui, tool: Tool) -> egui::text::LayoutJob {
+    let name = tool.name();
+    let key = format!("{:?}", tool.key()).to_lowercase();
+    let style = ui.style();
+    let plain = egui::TextFormat::simple(
+        egui::TextStyle::Button.resolve(style),
+        style.visuals.text_color(),
+    );
+    let mut job = egui::text::LayoutJob::default();
+    match name.to_lowercase().find(&key) {
+        Some(i) => {
+            let end = i + key.len();
+            job.append(&name[..i], 0.0, plain.clone());
+            let underline = egui::TextFormat {
+                underline: egui::Stroke::new(1.0, style.visuals.text_color()),
+                ..plain.clone()
+            };
+            job.append(&name[i..end], 0.0, underline);
+            job.append(&name[end..], 0.0, plain);
+        }
+        None => job.append(&format!("{name} ({})", key.to_uppercase()), 0.0, plain),
+    }
+    job
 }
 
 pub enum PanelAction {

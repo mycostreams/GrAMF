@@ -26,3 +26,6 @@ ureq = "3.4.2"
 web-time = "1.1.0"
 wgpu = { version = "29", default-features = false }
 winit = "0.30.13"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = "0.21"
