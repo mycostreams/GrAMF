@@ -19,7 +19,7 @@ GrAMF also replaces the `registrator` repo (v2).
 
 | source | access | notes |
 |---|---|---|
-| `stg_store.h5` (STHype) | **read-only, always** | opened via File > Open; never written by GrAMF |
+| `stg_store.h5` (STHype) | **read-only** | opened via File > Open; written only by the explicit, temporary Publish to store bridge (§10) |
 | `annotations.<author>.h5` annotation files | read/write (own author only) | beside the store; several can be loaded at once |
 | plate registry `AMF-PlateList/{NOW,OLD}_Experiments/*.xlsx` | read-only | path configurable; read with `calamine` |
 | per-frame spatial graphs (GeoJSON, later `graph.h5`) | read-only | separate workflow (v3), STG integration later |
@@ -136,11 +136,18 @@ decided one by one.
 | M6 | Developer view: store inspector, health checks, raw row view, evidence overlay, timings | — |
 | M7 | CI releases: macOS + Windows binaries on tag, static HDF5, update notice | colleague installs from Releases without a toolchain |
 
-### v2 — registrator replacement (Video registration workflow)
+### v2 — Video registration workflow (replaces `registrator`)
 
-Video runs per time group over the STG, point registration, edge pinning, trails, roots;
-writes `/flow_*` into the author's annotation file. STHype/transport_paper readers learn to read the
-annotation file. Parity target: the current `registrator` feature set.
+Designed 2026-10-20 (§10 has the full design). Milestones, each usable on its own:
+
+| # | milestone | done when |
+|---|---|---|
+| R1 | Settings panel (author, registry path, session gap); Trail tool (T) in Visualize & clean up | trails saved, reloaded, drawn |
+| R2 | Open a plate's `polyflow_analysis/`: runs, sessions, setup from camera serial, stage scatter, run slider; show an existing store `/flow_*` read-only | FLW2605A003 loads 6 positions x 35 runs in one session |
+| R3 | Placement: setup default transform, anchors with live fit and residuals, camera orientation, overlays on the map, Verify session | videos land on hyphae on FLW2605A003 |
+| R4 | Snap + cover: per-run rigid snap, coverage chains with direction, gaps drawn, flow values per video edge | every video edge shows its STG chain or a gap |
+| R5 | Per-run corrections (assign / remove / flip, disable artifact, nudge, copy from previous run); save registration + flow layer to the annotation file | round trip: correct, save, reopen, same mapping |
+| R6 | Publish to store (bridge); STHype reader accepts annotation files; transport_paper reads them | transport_paper runs on an annotation file |
 
 ### v3 — per-frame spatial graphs
 
@@ -164,7 +171,7 @@ contents change; the map view, timeline and loaded store stay put.
 | workflow | toolbar | left panel | right panel | lands in |
 |---|---|---|---|---|
 | **Visualize & clean up** | Select, Lasso, Add edge, Exclude, Merge, Root; colour-by | Layers, Annotations | Inspector + annotation fields | v1 |
-| **Video registration** | registrator tools: pick video run, register points, pin edge, trail | Video runs per time group | Video frame / video graph, pin list | v2 |
+| **Video registration** | Select, Anchor, Assign, Disable edge, Nudge; threshold; Publish to store | Sessions + stage scatter | Position, run, video edges, chain, corrections | v2 (§10) |
 | **Compute & plot** | choose metric / plot | Metric list | Plot area + export | future, per item |
 
 Only implemented workflows get a button; v1 ships with one, so the switcher appears in v2.
@@ -225,3 +232,108 @@ Only implemented workflows get a button; v1 ships with one, so the switcher appe
 - How downstream readers (STHype `store.py`, transport_paper) locate the chosen annotation file.
 - Exact annotation file column schemas — settle each when its writer lands (same rule as the store ADR).
 - Root/tip definition for `nodes.csv` (`is_tip` = degree 1 excluding added edges?).
+
+## 10. Video registration design (v2)
+
+Decided in the 2026-10-20 design session; the `registrator` survey that fed it found ~1,300
+lines of real logic and ~1,700 of UI. GrAMF does **not** port its workflow one-to-one.
+
+### Inputs
+
+- A plate's `polyflow_analysis/<position>/<YYYYMMDD_HHMMSS>/` run folders, each with
+  `run_metadata.json`, `extraction_graph.json` and `flow_analysis.parquet` (a run needs the
+  first and the last). From the metadata: `date_time`, `mode`, `run_nr` (may be null),
+  `deltas.delta_x` (µm/px), `camera.frame_size`, `camera.model` (incl. `SN:`) and
+  `position.x/y` (stage mm; the folder name `x_n10_38_y_4_484` is only the fallback).
+- Video graph: `extraction_graph.json` edges `[u, v, k]` with `pixel_list`; node positions in µm
+  relative to the frame centre (`(pixel - frame_size/2) * delta_x`). Flow values per edge and
+  direction from the parquet: `median, perc_25, perc_75, flux_ratio, coverage, pixel_count,
+  flux` (per-edge constants; take the first row per direction). Repair pre-fix parquets as
+  the registrator does (swap inverted quartiles; NaN `flux_ratio` = mean of per-frame values).
+- Each run snaps to the first STG timepoint at or after its `date_time` (clamped to the last).
+- Test plate: `registrator/temp/FLW/FLW2605A003` (store + 6 positions x 35 runs, ARETHA);
+  `FLW2605A015` as a second.
+
+### Setups and sessions
+
+- **Setup from the video camera serial**, copied from `pipeline-steps/pipeline_steps/optics.py`
+  (the source of truth; keep in step): `25054443` = ARETHA videos (acA2040-90um),
+  `40018720` = MORRISON videos (acA4112-30um). Unknown serial: scale only.
+- **Default transform per setup.** ARETHA: full stage-to-STG default (scale, rotation, mirror,
+  offset), because plate imaging and videos share one machine. MORRISON: default scale only;
+  rotation and mirror from anchors, because the plate is imaged elsewhere (PRINCE).
+  Stage scale is ~1000 µm/mm; the video's own scale is `deltas.delta_x`.
+- **Camera orientation** (video image axes vs stage axes) is part of the setup default, found
+  once by trying the 8 rotation/mirror options and keeping the best overlap with the STG.
+- **Sessions**: runs grouped by position's first-run time, new session when the gap exceeds
+  15 minutes (Settings). One transform per session, starting from the previous session's
+  (ARETHA's first from the default). Never trusted silently: a session placed with 0 anchors
+  is **unverified** until the user confirms it or adds an anchor. Each session shows a fit
+  score (how closely its snapped video graphs lie on the STG).
+- **Anchors** refine, live, as they are added: 1 fixes offset, 2 rotation and scale, 3+ a
+  least-squares fit with per-anchor residuals so a bad click stands out.
+
+### Matching: overlay, snap, cover (replaces the line-graph assignment and pins)
+
+1. **Overlay**: the session transform and camera orientation place the whole video graph
+   (not just its centre) in STG µm.
+2. **Snap**: per run, a small rigid fit (translation + small rotation) of the video graph onto
+   nearby STG arcs; the user can **nudge** it by dragging.
+3. **Cover**: sample each video edge; the STG edges (pipeline or added) its samples lie on,
+   within a threshold (default 10 µm), form its **chain**, each with a direction from the
+   shared tangent. Stretches on no edge are **gaps**, drawn dashed amber. Poorly covered edges
+   are flagged, never forced onto something.
+
+### Corrections (per run, by decision)
+
+- Assign: with a video edge selected, click STG edges to add / remove them from its chain;
+  F flips direction. Disable: mark a video edge as an artifact (contributes no flow).
+- Corrections are stored per (run, video edge) and override the automatic result; nothing
+  else re-solves. "Copy corrections from previous run" is an explicit button and lists what
+  it copied.
+- Gaps are bridged by hand with the Add edge tool (no suggested or automatic bridges); the
+  next cover pass includes the added edge, so flow can map onto added edges (ids >= 1 000 000).
+
+### Workspace (Video registration workflow)
+
+- Left: session list (status, anchors, fit score; Verify session) and the **stage scatter**
+  of the selected session (positions coloured mapped / gaps / unplaced; click to select).
+  No list view.
+- Map: all positions of the session faint, the selected run bright with per-edge colours,
+  gaps dashed, the snap window outlined.
+- Right: position and run (and the STG frame it snaps to), its video edges with coverage %
+  and chain length, the selected edge's chain and flow values, the correction controls.
+- Bottom: a run slider for the selected position; the STG time follows the run.
+- Tools: Select (S), Anchor (A), Assign (G), Disable edge (D), Nudge (N); threshold control;
+  Publish to store….
+- Not now: video frames under the overlay (not reachable); flow display in the Visualize
+  workflow (its own design round later).
+
+### Trails (Visualize & clean up)
+
+Trail tool (T): name a trail, click waypoints; it follows the geometric shortest path along
+the STG. Saved in the annotation file next to roots and notes.
+
+### Storage
+
+All in the author's `annotations.<author>.h5` (new optional groups; no schema bump):
+
+| group | content |
+|---|---|
+| `/registration/sessions` | start / end utc, 2x3 transform, verified |
+| `/registration/anchors` | session, position (run folder relative to `polyflow_analysis`), node_id |
+| `/registration/nudges` | run_path, dx, dy, d_rotation |
+| `/registration/assignments` | run_path, video u/v/k, chain as CSR of (edge_id, direction) |
+| `/registration/disabled` | run_path, video u/v/k |
+| `/flow_runs`, `/flow_measurements` | the result, in STHype's existing compound schema (edge_id may be an added edge) |
+| `/trails` | names, node path CSR, waypoint CSR |
+
+Anchors, nudges and corrections are saved, so a registration can be reopened and corrected
+(the registrator only stored their counts). On open, a store's existing `/flow_*`, trails and
+`/root_nodes` are offered for import, like `/root_nodes` today.
+
+**Publish to store** (temporary bridge): an explicit, confirmed action that writes the active
+author's `/flow_*`, trails and `/root_nodes` into the store, in STHype's existing format, for
+consumers that do not read annotation files yet. It is the one place GrAMF writes a store and
+is removed once STHype's `read_flow_mappings` accepts an annotation file and transport_paper
+names the file it uses.
