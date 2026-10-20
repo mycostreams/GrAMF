@@ -1,6 +1,8 @@
 mod annotate;
 mod dev_panel;
 mod export_dialog;
+#[cfg(target_os = "macos")]
+mod native_menu;
 mod ui;
 
 use crate::annotations::{self, AddedEdge, Annotations, Op};
@@ -63,6 +65,8 @@ pub struct App {
     style_key: Option<(Option<usize>, crate::colour::ColourBy, crate::colour::Scale)>,
     reference_width: f32,
     update_check: Option<std::sync::mpsc::Receiver<String>>,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<native_menu::NativeMenu>,
     update: Option<String>,
 }
 
@@ -283,6 +287,39 @@ impl App {
             Err(e) => format!("Export failed: {e}"),
         };
         self.dev.timings.export_ms = ms(started);
+    }
+
+    /// Quits, or first asks what to do with unsaved annotations.
+    fn request_quit(&mut self) {
+        if self.dirty() {
+            self.confirm = Some(Pending::Quit);
+        } else {
+            self.quit = true;
+        }
+    }
+
+    /// Acts on the macOS menu bar.
+    #[cfg(target_os = "macos")]
+    fn handle_native_menu(&mut self) {
+        use native_menu::Command;
+        for command in native_menu::NativeMenu::poll() {
+            let mut actions = ui::UiActions::default();
+            match command {
+                Command::Open => actions.open = true,
+                Command::Save => actions.save = true,
+                Command::Export => self.export.open = self.store.is_some(),
+                Command::Undo => actions.undo = true,
+                Command::Redo => actions.redo = true,
+                Command::ResetCamera => actions.fit = true,
+                Command::Developer => self.dev.open = !self.dev.open,
+                Command::Quit => self.request_quit(),
+            }
+            self.apply(actions);
+        }
+        let (store_open, developer) = (self.store.is_some(), self.dev.open);
+        if let Some(menu) = self.native_menu.as_mut() {
+            menu.sync(store_open, developer);
+        }
     }
 
     /// Carries out what waited on the unsaved-annotations prompt.
@@ -658,6 +695,10 @@ impl ApplicationHandler for App {
         if !self.initialized {
             env_logger::init();
             self.update_check = Some(crate::update::spawn_check());
+            #[cfg(target_os = "macos")]
+            {
+                self.native_menu = native_menu::NativeMenu::install();
+            }
         }
         let renderer =
             pollster::block_on(
@@ -701,6 +742,7 @@ impl ApplicationHandler for App {
         let mut click = None;
         let mut boxed = None;
         let mut escape = false;
+        let mut close_requested = false;
 
         // Handle specific window events such as keyboard input, resizing, and redraw requests
         match event {
@@ -789,13 +831,7 @@ impl ApplicationHandler for App {
                 let scale_factor = window.scale_factor() as f32;
                 gui_state.egui_ctx().set_pixels_per_point(scale_factor);
             }
-            WindowEvent::CloseRequested => {
-                if self.annot.as_ref().is_some_and(|a| a.own.dirty) {
-                    self.confirm = Some(Pending::Quit);
-                } else {
-                    event_loop.exit();
-                }
-            }
+            WindowEvent::CloseRequested => close_requested = true,
             WindowEvent::RedrawRequested => {
                 // Get time delta sice last draw
                 let now = Instant::now();
@@ -942,6 +978,11 @@ impl ApplicationHandler for App {
         if let Some(actions) = ui_actions {
             self.apply(actions);
         }
+        if close_requested {
+            self.request_quit();
+        }
+        #[cfg(target_os = "macos")]
+        self.handle_native_menu();
         if let Some(path) = self.pending_open.take() {
             self.open_store(&path);
         }

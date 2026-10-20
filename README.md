@@ -41,7 +41,7 @@ to point elsewhere.
 
 | | |
 |---|---|
-| File > Open store… | pick a `stg_store.h5` |
+| File > Open store… | pick a `stg_store.h5` (on macOS File / Edit / View are in the screen's menu bar) |
 | drag (right-drag with Box select) / scroll / Home or View > Reset Camera | pan / zoom at the cursor / fit the plate |
 | ← → / Space | previous / next timepoint / play |
 | V B X M R E | tools: select, box select, exclude, merge duplicate, root, add edge |

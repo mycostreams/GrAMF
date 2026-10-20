@@ -9,6 +9,9 @@ use crate::time::{TimeAxis, TimeUnit};
 /// Room right of the slider for the time label, faulty-frame marker and unit picker (points).
 const TIME_LABEL_WIDTH: f32 = 420.0;
 
+/// File / Edit / View live in the screen's menu bar on macOS, in the window elsewhere.
+const NATIVE_MENU: bool = cfg!(target_os = "macos");
+
 /// Seconds per frame when playing.
 const PLAY_STEP_S: f32 = 0.25;
 
@@ -162,12 +165,15 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         frame;
     let mut actions = UiActions::default();
 
-    // Shortcuts; single-letter tool keys only while no text field has focus.
-    ui.input(|i| {
-        actions.save = i.modifiers.command && i.key_pressed(egui::Key::S);
-        actions.undo = i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z);
-        actions.redo = i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z);
-    });
+    // Shortcuts; single-letter tool keys only while no text field has focus. On macOS the
+    // menu bar owns ⌘S / ⌘Z, so handling them here too would act twice.
+    if !NATIVE_MENU {
+        ui.input(|i| {
+            actions.save = i.modifiers.command && i.key_pressed(egui::Key::S);
+            actions.undo = i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z);
+            actions.redo = i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z);
+        });
+    }
     if let Some(st) = annot.as_deref_mut().filter(|_| !ui.ctx().egui_wants_keyboard_input()) {
         for tool in annotate::Tool::ALL {
             if ui.input(|i| !i.modifiers.command && i.key_pressed(tool.key())) {
@@ -191,42 +197,42 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
     egui::Panel::top("top").show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open store…").clicked() {
-                        actions.open = true;
-                        ui.close();
-                    }
-                    if ui.add(egui::Button::new("Save annotations").shortcut_text("⌘S / Ctrl+S")).clicked() {
-                        actions.save = true;
-                        ui.close();
-                    }
-                    if ui.add_enabled(store.is_some(), egui::Button::new("Export tables…")).clicked() {
-                        export.open = true;
-                        ui.close();
-                    }
-                });
-
-                ui.menu_button("View", |ui| {
-                    if ui.add(egui::Button::new("Reset Camera").shortcut_text("Home")).clicked() {
-                        actions.fit = true;
-                        ui.close();
-                    }
+                // macOS has these in the screen's menu bar (native_menu.rs) instead.
+                if !NATIVE_MENU {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Open store…").clicked() {
+                            actions.open = true;
+                            ui.close();
+                        }
+                        if ui.add(egui::Button::new("Save annotations").shortcut_text("Ctrl+S")).clicked() {
+                            actions.save = true;
+                            ui.close();
+                        }
+                        if ui.add_enabled(store.is_some(), egui::Button::new("Export tables…")).clicked() {
+                            export.open = true;
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("Edit", |ui| {
+                        if ui.add(egui::Button::new("Undo").shortcut_text("Ctrl+Z")).clicked() {
+                            actions.undo = true;
+                            ui.close();
+                        }
+                        if ui.add(egui::Button::new("Redo").shortcut_text("Ctrl+Shift+Z")).clicked() {
+                            actions.redo = true;
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("View", |ui| {
+                        if ui.add(egui::Button::new("Reset Camera").shortcut_text("Home")).clicked() {
+                            actions.fit = true;
+                            ui.close();
+                        }
+                        ui.separator();
+                        ui.checkbox(&mut dev.open, "Developer view");
+                    });
                     ui.separator();
-                    ui.checkbox(&mut dev.open, "Developer view");
-                });
-
-                ui.menu_button("Edit", |ui| {
-                    if ui.add(egui::Button::new("Undo").shortcut_text("⌘Z / Ctrl+Z")).clicked() {
-                        actions.undo = true;
-                        ui.close();
-                    }
-                    if ui.add(egui::Button::new("Redo").shortcut_text("⇧⌘Z / Ctrl+Shift+Z")).clicked() {
-                        actions.redo = true;
-                        ui.close();
-                    }
-                });
-
-                ui.separator();
+                }
 
                 ui.label(egui::RichText::new(title).color(egui::Color32::LIGHT_GREEN));
 
