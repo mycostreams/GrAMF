@@ -165,6 +165,8 @@ pub struct UiActions {
     pub evidence_toggled: bool,
     /// Pick the folder with the plate's video runs.
     pub choose_videos: bool,
+    pub detect_camera: bool,
+    pub save_setup_default: bool,
     pub fit: bool,
     /// The inspector's Raw rows section is open: keep the rows for the selected edge loaded.
     pub raw_wanted: bool,
@@ -188,7 +190,14 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             actions.redo = i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z);
         });
     }
-    if let Some(st) = annot.as_deref_mut().filter(|_| !ui.ctx().egui_wants_keyboard_input()) {
+    if let (true, Some(r)) = (registering && !ui.ctx().egui_wants_keyboard_input(), reg.as_deref_mut()) {
+        for (key, tool) in [(egui::Key::S, registration::RegTool::Select), (egui::Key::A, registration::RegTool::Anchor)] {
+            if ui.input(|i| !i.modifiers.command && i.key_pressed(key)) {
+                r.tool = tool;
+            }
+        }
+    }
+    if let Some(st) = annot.as_deref_mut().filter(|_| !registering && !ui.ctx().egui_wants_keyboard_input()) {
         for tool in annotate::Tool::ALL {
             if ui.input(|i| !i.modifiers.command && i.key_pressed(tool.key())) {
                 st.tool = tool;
@@ -283,9 +292,12 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             ui.separator();
             match (registering, annot.as_deref_mut()) {
                 (false, Some(st)) => annotate::toolbar(ui, st),
-                (true, _) => {
-                    ui.label(egui::RichText::new("placement and matching tools arrive in the next milestones").weak());
-                }
+                (true, _) => match reg.as_deref_mut() {
+                    Some(r) => registration::toolbar(ui, r),
+                    None => {
+                        ui.label(egui::RichText::new("choose the plate's video runs folder (left panel)").weak());
+                    }
+                },
                 _ => (),
             }
         });
@@ -330,8 +342,11 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         });
         if registering {
             if let Some(store) = store {
-                if let registration::Action::ChooseFolder = registration::left_panel(ui, reg.as_deref_mut(), store) {
-                    actions.choose_videos = true;
+                match registration::left_panel(ui, reg.as_deref_mut(), store) {
+                    registration::Action::ChooseFolder => actions.choose_videos = true,
+                    registration::Action::DetectCamera => actions.detect_camera = true,
+                    registration::Action::SaveDefault => actions.save_setup_default = true,
+                    registration::Action::None => (),
                 }
             }
             return;

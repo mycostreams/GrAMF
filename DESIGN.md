@@ -275,6 +275,12 @@ lines of real logic and ~1,700 of UI. GrAMF does **not** port its workflow one-t
   score (how closely its snapped video graphs lie on the STG).
 - **Anchors** refine, live, as they are added: 1 fixes offset, 2 rotation and scale, 3+ a
   least-squares fit with per-anchor residuals so a bad click stands out.
+- As built (R3): an anchor ties a position's video centre to a clicked STG point (snapped to
+  a node within 10 px). The fit score is the mean distance of the placed video-graph samples
+  to the nearest arc, capped at 50 µm. GrAMF ships an ARETHA default fitted from
+  FLW2605A003's six registrator anchors (scale 1008 µm/mm, 0.86°, mirrored, camera option 3;
+  score 6.1 µm with no anchors); "Save as <setup> default" replaces it in `~/.gramf/settings`.
+  Anchors, verified flags and the camera choice are kept in memory until R5 saves them.
 
 ### Matching: overlay, snap, cover (replaces the line-graph assignment and pins)
 

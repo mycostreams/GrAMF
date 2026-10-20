@@ -120,6 +120,34 @@ impl App {
         (plate, status, name)
     }
 
+    /// Detects the camera orientation on the selected session, and/or saves the session's fit
+    /// and camera as the setup default.
+    fn camera_and_default(&mut self, detect: bool, save: bool) {
+        let (Some(store), Some(reg)) = (self.store.as_ref(), self.reg.as_mut()) else {
+            return;
+        };
+        let i = reg.session;
+        let Some(Some(fit)) = reg.fits().into_iter().nth(i) else {
+            self.status = "Place the session first (anchor a video)".into();
+            return;
+        };
+        if detect {
+            let scores = reg.detect_camera(i, &fit.sim, store);
+            let list: Vec<String> = scores.iter().map(|(k, s)| format!("{k}: {s:.1}")).collect();
+            self.status = format!("Camera orientation {} (fit scores in µm, {})", reg.camera, list.join(", "));
+        }
+        if save {
+            let name = reg.videos.setup.name();
+            let default = crate::settings::SetupDefault { transform: fit.sim, camera: reg.camera };
+            self.settings.setup_defaults.insert(name.clone(), default);
+            reg.default = Some(fit.sim);
+            self.status = match self.settings.save() {
+                Ok(()) => format!("Saved this session's placement as the {name} default"),
+                Err(e) => format!("Could not save settings: {e}"),
+            };
+        }
+    }
+
     /// Asks for a `polyflow_analysis` folder and lists its runs.
     fn choose_videos(&mut self) {
         let Some(store) = self.store.as_ref() else {
@@ -135,7 +163,8 @@ impl App {
         };
         match crate::videos::scan(&dir) {
             Ok(v) if !v.positions.is_empty() => {
-                self.reg = Some(registration::Registration::new(v, self.settings.session_gap_minutes, store));
+                let default = self.settings.setup_default(&v.setup.name());
+                self.reg = Some(registration::Registration::new(v, self.settings.session_gap_minutes, store, default));
             }
             Ok(_) => self.status = format!("No video runs in {}", dir.display()),
             Err(e) => self.status = format!("Could not read {}: {e}", dir.display()),
@@ -237,7 +266,10 @@ impl App {
             .map(|dir| dir.join("polyflow_analysis"))
             .find(|dir| dir.is_dir())
             .and_then(|dir| crate::videos::scan(&dir).ok())
-            .map(|videos| registration::Registration::new(videos, self.settings.session_gap_minutes, &store));
+            .map(|videos| {
+                let default = self.settings.setup_default(&videos.setup.name());
+                registration::Registration::new(videos, self.settings.session_gap_minutes, &store, default)
+            });
         self.store = Some(store);
         self.dev.timings.annotations_ms = ms(started);
     }
@@ -469,8 +501,35 @@ impl App {
     /// Acts on a click at window pixel `px` with the current tool.
     fn pick(&mut self, px: [f32; 2]) {
         let started = Instant::now();
-        self.pick_inner(px);
+        if self.workflow == registration::Workflow::Registration {
+            self.registration_click(px);
+        } else {
+            self.pick_inner(px);
+        }
         self.dev.timings.pick_ms = ms(started);
+    }
+
+    /// A map click in the registration workspace: select a video, or anchor the selected one.
+    fn registration_click(&mut self, px: [f32; 2]) {
+        let (Some(renderer), Some(store), Some(reg)) = (self.renderer.as_ref(), self.store.as_ref(), self.reg.as_mut()) else {
+            return;
+        };
+        let at = renderer.screen_to_world(px);
+        match (reg.tool, reg.position) {
+            (registration::RegTool::Anchor, Some(p)) => {
+                let snap = store.pick_node(at, NODE_PICK_RADIUS_PX * renderer.um_per_px(), renderer.time);
+                let w = snap.map_or(at, |n| store.node_pos[n]);
+                reg.anchors.insert(p, [w[0] as f64, w[1] as f64]);
+            }
+            _ => {
+                if let Some(p) = registration::pick_video(reg, at, PICK_RADIUS_PX * renderer.um_per_px()) {
+                    if reg.position != Some(p) {
+                        reg.position = Some(p);
+                        reg.run = reg.shown_run(p);
+                    }
+                }
+            }
+        }
     }
 
     fn pick_inner(&mut self, px: [f32; 2]) {
@@ -621,6 +680,9 @@ impl App {
         }
         if actions.choose_videos {
             self.choose_videos();
+        }
+        if actions.detect_camera || actions.save_setup_default {
+            self.camera_and_default(actions.detect_camera, actions.save_setup_default);
         }
         self.raw_wanted = actions.raw_wanted;
         if let (true, Some(path)) = (actions.reveal, self.reveal.as_ref()) {
@@ -1038,16 +1100,19 @@ impl ApplicationHandler for App {
                     Some(ui::Selection::Added(id)) => Some(id),
                     _ => None,
                 };
-                let overlay = match (self.store.as_ref(), self.annot.as_ref()) {
-                    (Some(store), Some(st)) => annotate::overlay(store, st, renderer.time, selected_added, |p| {
-                        let [x, y] = renderer.world_to_screen(p);
-                        egui::pos2(x / ppp, y / ppp)
-                    }),
+                let to_pt = |p: [f32; 2]| {
+                    let [x, y] = renderer.world_to_screen(p);
+                    egui::pos2(x / ppp, y / ppp)
+                };
+                let registering = self.workflow == registration::Workflow::Registration;
+                let overlay = match (registering, self.store.as_ref(), self.annot.as_ref(), self.reg.as_mut()) {
+                    (true, _, _, Some(reg)) => registration::overlay(reg, to_pt),
+                    (false, Some(store), Some(st), _) => annotate::overlay(store, st, renderer.time, selected_added, to_pt),
                     _ => vec![],
                 };
                 let mut overlay = overlay;
                 let mut map_texts = vec![];
-                if let (Some(store), Some(st)) = (self.store.as_ref(), self.annot.as_ref()) {
+                if let (false, Some(store), Some(st)) = (registering, self.store.as_ref(), self.annot.as_ref()) {
                     let cursor = [self.cursor.x as f32, self.cursor.y as f32];
                     let (trail_shapes, texts) = trail_overlay(store, st, &self.trail_routes, renderer, ppp);
                     overlay.extend(trail_shapes);
