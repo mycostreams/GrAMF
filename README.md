@@ -44,7 +44,7 @@ to point elsewhere.
 | File > Open store… | pick a `stg_store.h5` (on macOS File / Edit / View are in the screen's menu bar) |
 | drag (right-drag with Box select) / scroll / Home or View > Reset Camera | pan / zoom at the cursor / fit the plate |
 | ← → / Space | previous / next timepoint / play |
-| V B X M R E | tools: select, box select, exclude, merge duplicate, root, add edge |
+| V B X M R E T | tools: select, box select, exclude, merge duplicate, root, add edge, trail |
 | Esc | cancel a tool step, else clear the selection |
 | Cmd/Ctrl+S, +Z, +Shift+Z | save annotations, undo, redo |
 | File > Export tables… | CSVs (+ README) for the plate, the view, or the selection (incl. a box) |
@@ -52,8 +52,11 @@ to point elsewhere.
 | « / » | hide or show the side panels |
 
 Your annotations are saved as `annotations.<your name>.h5` next to the store; colleagues'
-files there show as extra layers. The name comes from `~/.gramf/author` (else your login)
-and can be switched in the Annotations panel.
+files there show as extra layers. Trails (T) follow the shortest path through the waypoints
+you click and are saved with your annotations.
+
+Settings (⌘, on macOS, File > Settings… elsewhere) hold your author name, the plate registry
+folder and the video-registration session gap; they live in `~/.gramf/settings`.
 
 ## Build from source
 

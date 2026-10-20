@@ -1,7 +1,7 @@
 //! Annotation editing UI: tools, the Annotations panel, the inspector's edit section, the
 //! map overlay, and the unsaved-changes prompt (DESIGN.md §3, §7).
 
-use crate::annotations::{self, Annotations, Op, Target};
+use crate::annotations::{Annotations, Op, Target};
 use crate::store::Store;
 use egui::{Color32, Pos2, Shape, Stroke};
 use std::path::PathBuf;
@@ -15,14 +15,16 @@ pub enum Tool {
     Merge,
     Root,
     AddEdge,
+    Trail,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 6] = [Tool::Select, Tool::BoxSelect, Tool::Exclude, Tool::Merge, Tool::Root, Tool::AddEdge];
+    pub const ALL: [Tool; 7] =
+        [Tool::Select, Tool::BoxSelect, Tool::Exclude, Tool::Merge, Tool::Root, Tool::AddEdge, Tool::Trail];
 
     /// Tools that act on nodes: nodes are drawn and the one under the cursor highlighted.
     pub fn needs_nodes(self) -> bool {
-        matches!(self, Tool::Root | Tool::AddEdge)
+        matches!(self, Tool::Root | Tool::AddEdge | Tool::Trail)
     }
 
     fn name(self) -> &'static str {
@@ -33,6 +35,7 @@ impl Tool {
             Tool::Merge => "Merge",
             Tool::Root => "Root",
             Tool::AddEdge => "Add edge",
+            Tool::Trail => "Trail",
         }
     }
 
@@ -44,6 +47,7 @@ impl Tool {
             Tool::Merge => egui::Key::M,
             Tool::Root => egui::Key::R,
             Tool::AddEdge => egui::Key::E,
+            Tool::Trail => egui::Key::T,
         }
     }
 
@@ -55,6 +59,7 @@ impl Tool {
             Tool::Merge => "click the duplicate edge, then the edge it duplicates",
             Tool::Root => "click a node to toggle root",
             Tool::AddEdge => "click two nodes to connect them",
+            Tool::Trail => "click nodes to add waypoints to the active trail; it follows the shortest path",
         }
     }
 }
@@ -73,8 +78,9 @@ pub struct AnnotationState {
     pub first: Option<usize>,
     /// Text being edited in the inspector, for this target: (note, hyperedge override).
     pub fields: Option<(Target, String, String)>,
-    /// Text in the author field of the panel.
-    pub author_field: String,
+    /// The trail the Trail tool adds waypoints to, and the name field for a new one.
+    pub active_trail: Option<String>,
+    pub new_trail_name: String,
 }
 
 impl AnnotationState {
@@ -88,28 +94,9 @@ impl AnnotationState {
             tool: Tool::Select,
             first: None,
             fields: None,
-            author_field: author.into(),
+            active_trail: None,
+            new_trail_name: String::new(),
         }
-    }
-}
-
-/// Where the user's author name is kept between sessions.
-fn author_file() -> Option<PathBuf> {
-    std::env::home_dir().map(|h| h.join(".gramf").join("author"))
-}
-
-/// The saved author name, else the OS user name.
-pub fn load_author() -> String {
-    let saved = author_file().and_then(|p| std::fs::read_to_string(p).ok());
-    let name = saved.or_else(|| std::env::var("USER").or_else(|_| std::env::var("USERNAME")).ok());
-    let name = annotations::sanitize_author(name.as_deref().unwrap_or(""));
-    if name.is_empty() { "anonymous".into() } else { name }
-}
-
-pub fn save_author(name: &str) {
-    if let Some(path) = author_file() {
-        let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
-        let _ = std::fs::write(path, name);
     }
 }
 
@@ -126,6 +113,10 @@ pub fn toolbar(ui: &mut egui::Ui, st: &mut AnnotationState) {
         let hint = match (st.tool, st.first) {
             (Tool::Merge, Some(e)) => format!("edge {e} duplicates which edge? (Esc cancels)"),
             (Tool::AddEdge, Some(_)) => "click the second node (Esc cancels)".into(),
+            (Tool::Trail, _) => match &st.active_trail {
+                Some(name) => format!("click nodes to extend \"{name}\""),
+                None => "click a node to start a new trail".into(),
+            },
             (tool, _) => tool.help().into(),
         };
         ui.label(egui::RichText::new(hint).weak());
@@ -160,12 +151,13 @@ fn shortcut_label(ui: &egui::Ui, tool: Tool) -> egui::text::LayoutJob {
 
 pub enum PanelAction {
     Ops(Vec<Op>),
-    SwitchAuthor(String),
+    OpenSettings,
     None,
 }
 
 /// The Annotations section of the left panel.
-pub fn panel(ui: &mut egui::Ui, st: &mut AnnotationState, store: &Store) -> PanelAction {
+/// `unreachable` names the user's trails whose waypoints have no connecting path.
+pub fn panel(ui: &mut egui::Ui, st: &mut AnnotationState, store: &Store, unreachable: &[String]) -> PanelAction {
     let mut action = PanelAction::None;
     egui::CollapsingHeader::new("Annotations").default_open(true).show(ui, |ui| {
         let stale = |a: &Annotations| !a.fingerprint.is_empty() && a.fingerprint != store.fingerprint;
@@ -198,6 +190,8 @@ pub fn panel(ui: &mut egui::Ui, st: &mut AnnotationState, store: &Store) -> Pane
             .small(),
         );
 
+        trails_section(ui, st, store, unreachable, &mut action);
+
         if !store.root_nodes.is_empty() && st.own.roots.is_empty() {
             let label = format!("Import {} roots from store", store.root_nodes.len());
             if ui.button(label).on_hover_text("copies /root_nodes into your annotations").clicked() {
@@ -206,19 +200,64 @@ pub fn panel(ui: &mut egui::Ui, st: &mut AnnotationState, store: &Store) -> Pane
         }
 
         ui.horizontal(|ui| {
-            ui.label("author");
-            ui.add(egui::TextEdit::singleline(&mut st.author_field).desired_width(90.0));
-            let name = annotations::sanitize_author(&st.author_field);
-            let can = !name.is_empty() && name != st.author && !st.own.dirty;
-            let switch = ui.add_enabled(can, egui::Button::new("switch"));
-            if st.own.dirty {
-                switch.on_disabled_hover_text("save your annotations first");
-            } else if switch.clicked() {
-                action = PanelAction::SwitchAuthor(name);
+            ui.label(egui::RichText::new(format!("editing as {}", st.author)).weak().small());
+            if ui.small_button("Settings…").on_hover_text("change the author name").clicked() {
+                action = PanelAction::OpenSettings;
             }
         });
     });
     action
+}
+
+/// The user's trails: pick the active one, start, shorten or delete trails, import old ones.
+fn trails_section(ui: &mut egui::Ui, st: &mut AnnotationState, store: &Store, unreachable: &[String], action: &mut PanelAction) {
+    egui::CollapsingHeader::new(format!("Trails ({})", st.own.trails.len())).default_open(true).show(ui, |ui| {
+        let mut ops = vec![];
+        for (name, waypoints) in &st.own.trails {
+            ui.horizontal(|ui| {
+                let active = st.active_trail.as_deref() == Some(name.as_str());
+                if ui.selectable_label(active, name).on_hover_text("make this the trail the Trail tool extends").clicked() {
+                    st.active_trail = Some(name.clone());
+                }
+                ui.label(egui::RichText::new(format!("{} pts", waypoints.len())).weak().small());
+                if unreachable.contains(name) {
+                    ui.colored_label(Color32::LIGHT_RED, "no path").on_hover_text("some waypoints are not connected in the STG");
+                }
+            });
+        }
+        if let Some(name) = st.active_trail.clone().filter(|n| st.own.trails.contains_key(n)) {
+            ui.horizontal(|ui| {
+                let waypoints = &st.own.trails[&name];
+                if ui.add_enabled(!waypoints.is_empty(), egui::Button::new("Remove last point").small()).clicked() {
+                    ops.push(Op::SetTrail(name.clone(), Some(waypoints[..waypoints.len() - 1].to_vec())));
+                }
+                if ui.small_button("Delete").clicked() {
+                    ops.push(Op::SetTrail(name.clone(), None));
+                    st.active_trail = None;
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut st.new_trail_name).hint_text("new trail name").desired_width(110.0));
+            let name = st.new_trail_name.trim().to_string();
+            let ok = !name.is_empty() && !st.own.trails.contains_key(&name);
+            if ui.add_enabled(ok, egui::Button::new("New").small()).clicked() {
+                ops.push(Op::SetTrail(name.clone(), Some(vec![])));
+                st.active_trail = Some(name);
+                st.new_trail_name.clear();
+                st.tool = Tool::Trail;
+            }
+        });
+        if !store.trails_in_store.is_empty() && st.own.trails.is_empty() {
+            let label = format!("Import {} trails from store", store.trails_in_store.len());
+            if ui.small_button(label).on_hover_text("copies /flow_trails_* (their full node paths) into your annotations").clicked() {
+                ops.extend(store.trails_in_store.iter().map(|(n, nodes)| Op::SetTrail(n.clone(), Some(nodes.clone()))));
+            }
+        }
+        if !ops.is_empty() {
+            *action = PanelAction::Ops(ops);
+        }
+    });
 }
 
 const STALE_HELP: &str = "made against a different backbone_fingerprint: the store was rebuilt, \

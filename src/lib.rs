@@ -4,6 +4,7 @@ pub mod colour;
 pub mod devtools;
 pub mod export;
 pub mod registry;
+pub mod settings;
 pub mod renderer;
 pub mod store;
 pub mod time;

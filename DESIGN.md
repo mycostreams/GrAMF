@@ -81,7 +81,10 @@ Unknown datasets or newer schema versions are shown in the inspector, never refu
   Writes are atomic: write `*.tmp`, then rename.
 - A store carrying `/root_nodes` (old registrator) offers a one-time import into the user's
   file; `/flow_*` import comes with the video-registration workflow (v2).
-- Author name: `~/.gramf/author`, else the OS user name; switchable in the Annotations panel.
+- Author name, registry folder and session gap: Settings window, stored in `~/.gramf/settings`
+  (`key = value`; the older `~/.gramf/author` is read once). `GRAMF_REGISTRY` still overrides.
+- `/trails`: `name`, `waypoint_offsets` + `waypoints` (what the user clicked), `node_offsets` +
+  `nodes` (the routed path, written at save for readers that cannot route).
 
 ## 4. Time model
 

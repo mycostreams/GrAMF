@@ -12,6 +12,7 @@ pub enum Command {
     Redo,
     ResetCamera,
     Developer,
+    Settings,
     Quit,
 }
 
@@ -49,6 +50,8 @@ impl NativeMenu {
             true,
             &[
                 &PredefinedMenuItem::about(None, Some(about)),
+                &sep(),
+                &item("settings", "Settings…", "CmdOrCtrl+Comma"),
                 &sep(),
                 &PredefinedMenuItem::services(None),
                 &sep(),
@@ -102,6 +105,7 @@ impl NativeMenu {
                 "redo" => Some(Command::Redo),
                 "reset_camera" => Some(Command::ResetCamera),
                 "developer" => Some(Command::Developer),
+                "settings" => Some(Command::Settings),
                 "quit" => Some(Command::Quit),
                 _ => None,
             })

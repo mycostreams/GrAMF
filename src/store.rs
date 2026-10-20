@@ -62,6 +62,11 @@ pub struct Store {
     pub width_t: Vec<f32>,
     /// 5th, 50th and 95th percentile of the measured per-timestep widths.
     pub width_t_quantiles: Option<[f32; 3]>,
+    /// Edge id per unordered node pair `(min, max)`; the first edge when pairs repeat.
+    pub edge_by_nodes: HashMap<(i64, i64), usize>,
+    /// Trails the old registrator wrote (`/flow_trails_*`), offered for import: name and
+    /// routed node path.
+    pub trails_in_store: Vec<(String, Vec<i64>)>,
 }
 
 /// The `/edge_width_segments` columns GrAMF uses (HDF5 converts compound members by name).
@@ -223,6 +228,22 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         .map(|s| s.to_string())
         .unwrap_or_default();
     let root_nodes = read_i64("root_nodes").unwrap_or_default();
+    let mut edge_by_nodes = HashMap::new();
+    for (e, &[u, v]) in edge_nodes.iter().enumerate() {
+        edge_by_nodes.entry((u.min(v), u.max(v))).or_insert(e);
+    }
+    let trails_in_store = match (
+        file.dataset("flow_trails_names").and_then(|d| d.read_raw::<hdf5_metno::types::VarLenUnicode>()),
+        read_i64("flow_trails_offsets"),
+        read_i64("flow_trails_nodes"),
+    ) {
+        (Ok(names), Ok(offsets), Ok(nodes)) if offsets.len() == names.len() + 1 => names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), nodes[offsets[i] as usize..offsets[i + 1] as usize].to_vec()))
+            .collect(),
+        _ => vec![],
+    };
     let (width_t, width_t_quantiles) = file
         .dataset("edge_width_timesteps")
         .and_then(|d| d.read_raw::<WidthTimestep>())
@@ -248,6 +269,8 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         root_nodes,
         width_t,
         width_t_quantiles,
+        edge_by_nodes,
+        trails_in_store,
     })
 }
 
@@ -336,6 +359,46 @@ impl Store {
             .collect()
     }
 
+    /// Shortest path (by arc length) through every waypoint in turn, over the STG plus
+    /// `extra` edges (`(u, v, length_um)`, e.g. added edges), as node ids. `None` when some
+    /// leg has no path.
+    pub fn route(&self, waypoints: &[i64], extra: &[(i64, i64, f32)]) -> Option<Vec<i64>> {
+        let mut adjacency: HashMap<i64, Vec<(i64, f32)>> = HashMap::new();
+        let edges = self.edge_nodes.iter().enumerate().map(|(e, &[u, v])| (u, v, self.edge_length_um[e]));
+        for (u, v, len) in edges.chain(extra.iter().copied()) {
+            adjacency.entry(u).or_default().push((v, len));
+            adjacency.entry(v).or_default().push((u, len));
+        }
+        let mut path = vec![*waypoints.first()?];
+        for leg in waypoints.windows(2) {
+            let piece = dijkstra(&adjacency, leg[0], leg[1])?;
+            path.extend(&piece[1..]);
+        }
+        Some(path)
+    }
+
+    /// Geometry of a node path: each step follows its edge's arc (straight when the step is
+    /// an added edge or unknown).
+    pub fn path_polyline(&self, nodes: &[i64]) -> Vec<[f32; 2]> {
+        let pos = |id: &i64| self.node_index.get(id).map(|&n| self.node_pos[n]);
+        let mut out: Vec<[f32; 2]> = nodes.first().and_then(pos).into_iter().collect();
+        for step in nodes.windows(2) {
+            let (a, b) = (step[0], step[1]);
+            match self.edge_by_nodes.get(&(a.min(b), a.max(b))) {
+                Some(&e) => {
+                    let arc = &self.arcs.points[self.arcs.offsets[e]..self.arcs.offsets[e + 1]];
+                    if self.edge_nodes[e][0] == a {
+                        out.extend(arc.iter().skip(1));
+                    } else {
+                        out.extend(arc.iter().rev().skip(1));
+                    }
+                }
+                None => out.extend(pos(&b)),
+            }
+        }
+        out
+    }
+
     /// Edges of hyperedge `h`.
     pub fn hyperedge_edges(&self, h: i64) -> Vec<usize> {
         (0..self.hyperedge.len()).filter(|&e| self.hyperedge[e] == h).collect()
@@ -367,6 +430,40 @@ impl Store {
             radius,
         )
     }
+}
+
+/// Dijkstra between two node ids; the path as node ids, `None` if unreachable.
+fn dijkstra(adjacency: &HashMap<i64, Vec<(i64, f32)>>, from: i64, to: i64) -> Option<Vec<i64>> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    // Non-negative f32 compare like their bit patterns, so they can key the heap.
+    let key = |d: f32| Reverse(d.to_bits());
+    let mut dist: HashMap<i64, f32> = HashMap::from([(from, 0.0)]);
+    let mut prev: HashMap<i64, i64> = HashMap::new();
+    let mut heap = BinaryHeap::from([(key(0.0), from)]);
+    while let Some((Reverse(bits), node)) = heap.pop() {
+        let d = f32::from_bits(bits);
+        if node == to {
+            let mut path = vec![to];
+            while let Some(&p) = prev.get(path.last()?) {
+                path.push(p);
+            }
+            path.reverse();
+            return Some(path);
+        }
+        if d > dist[&node] {
+            continue;
+        }
+        for &(next, len) in adjacency.get(&node).into_iter().flatten() {
+            let nd = d + len.max(0.0);
+            if dist.get(&next).is_none_or(|&old| nd < old) {
+                dist.insert(next, nd);
+                prev.insert(next, node);
+                heap.push((key(nd), next));
+            }
+        }
+    }
+    None
 }
 
 fn nearest(items: impl Iterator<Item = usize>, d2: impl Fn(usize) -> f32, radius: f32) -> Option<usize> {
@@ -462,7 +559,19 @@ fn arcs_from_raw(offsets: &[i64], flat_points: &[f64]) -> Result<Arcs, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WidthSegment, WidthTimestep, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs, width_table};
+    use super::{dijkstra, WidthSegment, WidthTimestep, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs, width_table};
+
+    #[test]
+    fn dijkstra_takes_the_shorter_way() {
+        let mut adj: std::collections::HashMap<i64, Vec<(i64, f32)>> = Default::default();
+        for (u, v, l) in [(1, 2, 1.0), (2, 3, 1.0), (1, 3, 5.0), (3, 4, 1.0)] {
+            adj.entry(u).or_default().push((v, l));
+            adj.entry(v).or_default().push((u, l));
+        }
+        assert_eq!(dijkstra(&adj, 1, 4), Some(vec![1, 2, 3, 4]));
+        assert_eq!(dijkstra(&adj, 4, 1), Some(vec![4, 3, 2, 1]));
+        assert_eq!(dijkstra(&adj, 1, 99), None);
+    }
 
     #[test]
     fn width_table_prefers_seg_and_carries_forward() {

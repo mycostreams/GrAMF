@@ -1,6 +1,7 @@
 use super::annotate::{self, AnnotationState, Choice};
 use super::dev_panel::{self, DevState};
 use super::export_dialog::{self, ExportDialog};
+use super::settings_window::{self, SettingsWindow};
 use crate::annotations::{Op, Target};
 use crate::colour::{Cmap, ColourBy, Scale};
 use crate::store::Store;
@@ -136,6 +137,11 @@ pub struct FrameState<'a> {
     pub boxed: &'a [usize],
     /// The status line names a file that can be shown in the file manager.
     pub reveal: bool,
+    pub settings_window: &'a mut SettingsWindow,
+    /// The user's trails with no connecting path.
+    pub unreachable_trails: &'a [String],
+    /// Text drawn on the map (e.g. trail names), in points.
+    pub map_texts: &'a [(egui::Pos2, String, egui::Color32)],
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -148,7 +154,8 @@ pub struct UiActions {
     pub save: bool,
     pub undo: bool,
     pub redo: bool,
-    pub switch_author: Option<String>,
+    pub open_settings: bool,
+    pub settings_saved: Option<crate::settings::Settings>,
     pub choice: Option<Choice>,
     pub export: bool,
     pub evidence_toggled: bool,
@@ -161,7 +168,7 @@ pub struct UiActions {
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal } =
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal, settings_window, unreachable_trails, map_texts } =
         frame;
     let mut actions = UiActions::default();
 
@@ -187,6 +194,10 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             actions.choice = annotate::confirm(ui, &st.author);
         }
     }
+    if settings_window.is_open() {
+        let author_locked = annot.as_deref().is_some_and(|st| st.own.dirty);
+        actions.settings_saved = settings_window::show(ui.ctx(), settings_window, author_locked);
+    }
     if export.open {
         let authors: Vec<String> = annot
             .as_deref()
@@ -210,6 +221,11 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                         }
                         if ui.add_enabled(store.is_some(), egui::Button::new("Export tables…")).clicked() {
                             export.open = true;
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("Settings…").clicked() {
+                            actions.open_settings = true;
                             ui.close();
                         }
                     });
@@ -314,9 +330,9 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         }
         if let (Some(st), Some(store)) = (annot.as_deref_mut(), store) {
             ui.separator();
-            match annotate::panel(ui, st, store) {
+            match annotate::panel(ui, st, store, unreachable_trails) {
                 annotate::PanelAction::Ops(ops) => actions.ops.extend(ops),
-                annotate::PanelAction::SwitchAuthor(name) => actions.switch_author = Some(name),
+                annotate::PanelAction::OpenSettings => actions.open_settings = true,
                 annotate::PanelAction::None => (),
             }
         }
@@ -358,6 +374,9 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
     let map = ui.available_rect_before_wrap();
     let painter = ui.painter_at(map);
     painter.extend(overlay.iter().cloned());
+    for (pos, text, colour) in map_texts {
+        painter.text(*pos, egui::Align2::LEFT_BOTTOM, text, egui::FontId::proportional(12.0), *colour);
+    }
     if let Some(labels) = labels {
         for (pos, text) in labels {
             painter.text(
