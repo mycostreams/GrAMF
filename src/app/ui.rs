@@ -561,11 +561,13 @@ fn legend(ui: &mut egui::Ui, store: &Store, layers: &mut Layers, timeline: Optio
     };
     let bar = ui
         .horizontal(|ui| {
-            let size = egui::vec2((ui.available_width() - 60.0).clamp(60.0, 160.0), 10.0);
+            let size = egui::vec2((ui.available_width() - 28.0).clamp(60.0, 160.0), 10.0);
             let bar = colour_bar(ui, layers.scale, size, egui::Sense::click())
                 .on_hover_text(format!("{} — click to change the colormap", layers.scale.cmap.name()))
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
-            if ui.selectable_label(layers.scale.reversed, "reverse").on_hover_text("reverse the colormap").clicked() {
+            // ⇄ is only in the bundled monospace font (Hack), so ask for monospace explicitly
+            let icon = egui::RichText::new("⇄").monospace();
+            if ui.selectable_label(layers.scale.reversed, icon).on_hover_text("reverse the colormap").clicked() {
                 layers.scale.reversed = !layers.scale.reversed;
             }
             bar
