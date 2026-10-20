@@ -345,11 +345,20 @@ All in the author's `annotations.<author>.h5` (new optional groups; no schema bu
 | `/trails` | names, node path CSR, waypoint CSR |
 
 Anchors, nudges and corrections are saved, so a registration can be reopened and corrected
-(the registrator only stored their counts). On open, a store's existing `/flow_*`, trails and
+(the registrator only stored their counts). As built (R5): every registration change is an annotation edit
+(undo/redo, unsaved marker); the flow layer is recomputed on save from **verified sessions
+only**, so unchecked placements never reach downstream analysis (FLW2605A003: 210 runs,
+6,462 measurements in 1.6 s). STHype's `read_flow_mappings` reads the result unchanged
+when its tables are placed in a store. On open, a store's existing `/flow_*`, trails and
 `/root_nodes` are offered for import, like `/root_nodes` today.
 
 **Publish to store** (temporary bridge): an explicit, confirmed action that writes the active
 author's `/flow_*`, trails and `/root_nodes` into the store, in STHype's existing format, for
 consumers that do not read annotation files yet. It is the one place GrAMF writes a store and
 is removed once STHype's `read_flow_mappings` accepts an annotation file and transport_paper
-names the file it uses.
+names the file it uses. As built (R6): a toolbar button in Video registration; it saves first, asks with a
+native dialog, refuses a store whose `backbone_fingerprint` differs from the annotations',
+and writes a copy (`stg_store.h5.publishing`) renamed over the store only when complete.
+Measurements on added edges have no store `edge_id`, so they stay in the annotation file
+(the status line counts them). STHype's `read_flow_mappings` and `read_root_nodes` read
+the result.

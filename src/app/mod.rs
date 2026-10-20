@@ -70,6 +70,8 @@ pub struct App {
     /// Box select: world corner where the drag started, and the edges of the last box.
     box_start: Option<[f32; 2]>,
     boxed: Vec<usize>,
+    /// Nudge tool drag: world point where it started, and the run's nudge before it.
+    nudge_drag: Option<([f32; 2], [f32; 2])>,
     /// A file the status line offers to show in Finder / Explorer.
     reveal: Option<PathBuf>,
     /// What the per-edge style table was last built for: (timepoint, colour mode, scale).
@@ -134,11 +136,12 @@ impl App {
         if detect {
             let scores = reg.detect_camera(i, &fit.sim, store);
             let list: Vec<String> = scores.iter().map(|(k, s)| format!("{k}: {s:.1}")).collect();
-            self.status = format!("Camera orientation {} (fit scores in µm, {})", reg.camera, list.join(", "));
+            let best = scores.first().map_or(reg.camera(), |s| s.0);
+            self.status = format!("Camera orientation {best} (fit scores in µm, {})", list.join(", "));
         }
         if save {
             let name = reg.videos.setup.name();
-            let default = crate::settings::SetupDefault { transform: fit.sim, camera: reg.camera };
+            let default = crate::settings::SetupDefault { transform: fit.sim, camera: reg.camera() };
             self.settings.setup_defaults.insert(name.clone(), default);
             reg.default = Some(fit.sim);
             self.status = match self.settings.save() {
@@ -325,28 +328,103 @@ impl App {
 
     fn save_annotations(&mut self) -> bool {
         self.refresh_trail_routes();
+        // With video runs loaded, the flow layer is recomputed from the verified sessions;
+        // otherwise the one last loaded is kept.
+        let mut flow_note = String::new();
+        if let (Some(reg), Some(store), Some(st)) = (self.reg.as_mut(), self.store.as_ref(), self.annot.as_mut()) {
+            let added = added_segments(store, Some(&*st));
+            let (flow, sessions, runs) = registration::flow_output(reg, store, &added);
+            flow_note = format!(" · flow: {sessions} verified sessions, {runs} runs, {} measurements", flow.measurements.len());
+            st.own.flow = (!flow.runs.is_empty()).then_some(flow);
+        }
+        let trail_paths = self.trail_paths();
         let Some(st) = self.annot.as_mut() else {
             return false;
         };
-        let trail_paths: std::collections::BTreeMap<String, Vec<i64>> = st
-            .own
-            .trails
-            .keys()
-            .filter_map(|name| {
-                let path = self.trail_routes.get(&(st.author.clone(), name.clone()))?.2.clone()?;
-                Some((name.clone(), path))
-            })
-            .collect();
         match annotations::save(&st.own, &st.own_path, &trail_paths) {
             Ok(()) => {
                 st.own.dirty = false;
-                self.status = format!("Saved {}", st.own_path.display());
+                self.status = format!("Saved {}{flow_note}", st.own_path.display());
                 true
             }
             Err(e) => {
                 self.status = format!("Could not save {}: {e}", st.own_path.display());
                 false
             }
+        }
+    }
+
+    /// The active author's trails' routed node paths.
+    fn trail_paths(&self) -> std::collections::BTreeMap<String, Vec<i64>> {
+        let Some(st) = self.annot.as_ref() else {
+            return Default::default();
+        };
+        st.own
+            .trails
+            .keys()
+            .filter_map(|name| {
+                let path = self.trail_routes.get(&(st.author.clone(), name.clone()))?.2.clone()?;
+                Some((name.clone(), path))
+            })
+            .collect()
+    }
+
+    /// Publish to store (DESIGN.md §10): saves, asks, then writes the active author's flow
+    /// layer, trails and roots into the store.
+    fn publish_to_store(&mut self) {
+        if !self.save_annotations() {
+            return;
+        }
+        let trail_paths = self.trail_paths();
+        let (Some(store), Some(path), Some(st)) = (self.store.as_mut(), self.store_path.as_ref(), self.annot.as_ref()) else {
+            return;
+        };
+        let Some(flow) = st.own.flow.as_ref() else {
+            self.status = "Nothing to publish: verify a session first".into();
+            return;
+        };
+        let question = format!(
+            "Write {}'s flow layer ({} runs, {} measurements), {} trails and {} roots into {}?\n\n\
+             This replaces the store's /flow_runs, /flow_measurements, /flow_trails_* and /root_nodes. \
+             Nothing else in the store changes.",
+            st.author,
+            flow.runs.len(),
+            flow.measurements.len(),
+            st.own.trails.len(),
+            st.own.roots.len(),
+            path.display()
+        );
+        let ok = rfd::MessageDialog::new()
+            .set_title("Publish to store")
+            .set_description(question)
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        if ok != rfd::MessageDialogResult::Ok {
+            return;
+        }
+        match annotations::publish(&st.own, path, store.n_edges(), &trail_paths) {
+            Ok(p) => {
+                // what the store now holds, without re-reading it
+                store.root_nodes = st.own.roots.iter().copied().collect();
+                store.trails_in_store = trail_paths.into_iter().collect();
+                store.flow_in_store = Some(crate::store::FlowLayer {
+                    run_paths: flow.runs.iter().map(|r| r.run_path.to_string()).collect(),
+                    n_measurements: p.measurements,
+                    written_by: "GrAMF".into(),
+                });
+                let skipped = match p.on_added_edges {
+                    0 => String::new(),
+                    n => format!(" ({n} on added edges stay in the annotation file)"),
+                };
+                self.status = format!(
+                    "Published to {}: {} measurements{skipped}, {} trails, {} roots",
+                    path.display(),
+                    p.measurements,
+                    p.trails,
+                    p.roots
+                );
+            }
+            Err(e) => self.status = format!("Could not publish to {}: {e}", path.display()),
         }
     }
 
@@ -515,16 +593,41 @@ impl App {
             return;
         };
         let at = renderer.screen_to_world(px);
+        let added = added_segments(store, self.annot.as_ref());
+        let radius = PICK_RADIUS_PX * renderer.um_per_px();
         match (reg.tool, reg.position) {
+            (registration::RegTool::Assign, Some(_)) => {
+                let edge = store
+                    .pick_edge(at, radius, f32::MAX)
+                    .map(crate::matching::EdgeRef::Pipeline)
+                    .or_else(|| {
+                        added
+                            .iter()
+                            .map(|a| (crate::store::segment_dist2(at, a.a, a.b).sqrt(), a.id))
+                            .filter(|x| x.0 <= radius)
+                            .min_by(|a, b| a.0.total_cmp(&b.0))
+                            .map(|x| crate::matching::EdgeRef::Added(x.1))
+                    });
+                if let Some(op) = edge.and_then(|e| registration::toggle_in_chain(reg, store, &added, e)) {
+                    reg.pending.push(op);
+                }
+            }
+            (registration::RegTool::Disable, Some(p)) => {
+                if let Some(key) = registration::video_edge_at(reg, store, &added, at, radius) {
+                    let run_edge = (reg.run_path(p, reg.shown_run(p)), key);
+                    let now = reg.layer.disabled.contains(&run_edge);
+                    reg.pending.push(Op::SetDisabled(run_edge, !now));
+                    reg.video_edge = Some(key);
+                }
+            }
+            (registration::RegTool::Nudge, _) => (), // drags, not clicks
             (registration::RegTool::Anchor, Some(p)) => {
                 let snap = store.pick_node(at, NODE_PICK_RADIUS_PX * renderer.um_per_px(), renderer.time);
                 let w = snap.map_or(at, |n| store.node_pos[n]);
-                reg.anchors.insert(p, [w[0] as f64, w[1] as f64]);
+                let name = reg.videos.positions[p].name.clone();
+                reg.pending.push(Op::SetAnchor(name, Some([w[0] as f64, w[1] as f64])));
             }
-            _ => {
-                let added = added_segments(store, self.annot.as_ref());
-                registration::pick(reg, store, &added, at, PICK_RADIUS_PX * renderer.um_per_px());
-            }
+            _ => registration::pick(reg, store, &added, at, radius),
         }
     }
 
@@ -676,6 +779,9 @@ impl App {
         }
         if actions.choose_videos {
             self.choose_videos();
+        }
+        if actions.publish {
+            self.publish_to_store();
         }
         if actions.detect_camera || actions.save_setup_default {
             self.camera_and_default(actions.detect_camera, actions.save_setup_default);
@@ -1027,10 +1133,24 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => {
-                let boxing = self.annot.as_ref().is_some_and(|a| a.tool == Tool::BoxSelect);
+                let registering = self.workflow == registration::Workflow::Registration;
+                let boxing = !registering && self.annot.as_ref().is_some_and(|a| a.tool == Tool::BoxSelect);
+                let nudging = registering
+                    && self.reg.as_ref().is_some_and(|r| r.tool == registration::RegTool::Nudge && r.position.is_some());
                 let cursor = [self.cursor.x as f32, self.cursor.y as f32];
                 let pressed = state == ElementState::Pressed;
-                if boxing {
+                if let (true, Some(reg)) = (nudging, self.reg.as_mut()) {
+                    let p = reg.position.unwrap_or(0);
+                    let rel = reg.run_path(p, reg.shown_run(p));
+                    if pressed {
+                        let base = reg.layer.nudges.get(&rel).copied().unwrap_or([0.0; 2]);
+                        self.nudge_drag = Some((renderer.screen_to_world(cursor), base));
+                    } else if self.nudge_drag.take().is_some() {
+                        if let Some(n) = reg.drag_nudge.take() {
+                            reg.pending.push(Op::SetNudge(rel, Some(n)));
+                        }
+                    }
+                } else if boxing {
                     if pressed {
                         self.box_start = Some(renderer.screen_to_world(cursor));
                     } else if let Some(start) = self.box_start.take() {
@@ -1054,7 +1174,10 @@ impl ApplicationHandler for App {
                 ..
             } => self.dragging = state == ElementState::Pressed,
             WindowEvent::CursorMoved { position, .. } => {
-                if self.dragging {
+                if let (Some((start, base)), Some(reg)) = (self.nudge_drag, self.reg.as_mut()) {
+                    let now = renderer.screen_to_world([position.x as f32, position.y as f32]);
+                    reg.drag_nudge = Some([base[0] + now[0] - start[0], base[1] + now[1] - start[1]]);
+                } else if self.dragging {
                     let (dx, dy) = (position.x - self.cursor.x, position.y - self.cursor.y);
                     renderer.pan(dx as f32, dy as f32);
                 }
@@ -1274,6 +1397,14 @@ impl ApplicationHandler for App {
         }
         #[cfg(target_os = "macos")]
         self.handle_native_menu();
+        // Registration edits go through the annotation file (undo, dirty, save) and come
+        // back into the workspace as its current state.
+        if let (Some(reg), Some(st)) = (self.reg.as_mut(), self.annot.as_mut()) {
+            for op in reg.pending.drain(..) {
+                st.own.edit(op);
+            }
+            reg.sync(&st.own.registration);
+        }
         if let Some(path) = self.pending_open.take() {
             self.open_store(&path);
         }

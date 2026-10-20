@@ -202,13 +202,13 @@ impl AppRenderer {
                 match self.gpu.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame)
                     | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-                    wgpu::CurrentSurfaceTexture::Occluded => return,
+                    wgpu::CurrentSurfaceTexture::Occluded => return Self::skip_frame(&self.gpu.queue, encoder),
                     other => {
                         panic!("Failed to get surface texture after reconfiguration: {other:?}")
                     }
                 }
             }
-            wgpu::CurrentSurfaceTexture::Occluded => return,
+            wgpu::CurrentSurfaceTexture::Occluded => return Self::skip_frame(&self.gpu.queue, encoder),
             other => panic!("Failed to get surface texture: {other:?}"),
         };
 
@@ -278,5 +278,12 @@ impl AppRenderer {
 
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
         surface_texture.present();
+    }
+
+    /// A hidden window still submits the frame's buffer writes, or they pile up unfreed
+    /// (gigabytes per second under `ControlFlow::Poll`), and waits a little instead of spinning.
+    fn skip_frame(queue: &wgpu::Queue, encoder: wgpu::CommandEncoder) {
+        queue.submit(std::iter::once(encoder.finish()));
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
