@@ -67,6 +67,23 @@ pub struct Store {
     /// Trails the old registrator wrote (`/flow_trails_*`), offered for import: name and
     /// routed node path.
     pub trails_in_store: Vec<(String, Vec<i64>)>,
+    /// The registrator's flow layer in this store (`/flow_runs`, `/flow_measurements`), shown
+    /// read-only until it is imported.
+    pub flow_in_store: Option<FlowLayer>,
+}
+
+pub struct FlowLayer {
+    /// `/flow_runs/run_path`: `<position>/<timestamp>` relative to `polyflow_analysis`.
+    pub run_paths: Vec<String>,
+    pub n_measurements: usize,
+    pub written_by: String,
+}
+
+/// The `/flow_runs` column GrAMF reads (HDF5 converts compound members by name).
+#[derive(hdf5_metno::H5Type, Clone)]
+#[repr(C)]
+struct FlowRunRow {
+    run_path: hdf5_metno::types::VarLenUnicode,
 }
 
 /// The `/edge_width_segments` columns GrAMF uses (HDF5 converts compound members by name).
@@ -250,6 +267,17 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         .map(|rows| width_table(&rows, timepoints.len(), n_edges))
         .unwrap_or_default();
 
+    let flow_in_store = file.dataset("flow_runs").and_then(|d| d.read_raw::<FlowRunRow>()).ok().map(|rows| {
+        let measurements = file.dataset("flow_measurements").ok();
+        FlowLayer {
+            run_paths: rows.iter().map(|r| r.run_path.to_string()).collect(),
+            n_measurements: measurements.as_ref().map_or(0, |d| d.shape().first().copied().unwrap_or(0)),
+            written_by: measurements
+                .and_then(|d| d.attr("written_by").and_then(|a| a.read_scalar::<hdf5_metno::types::VarLenUnicode>()).ok())
+                .map_or_else(String::new, |s| s.to_string()),
+        }
+    });
+
     Ok(Store {
         arcs,
         vertex_t,
@@ -271,6 +299,7 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         width_t_quantiles,
         edge_by_nodes,
         trails_in_store,
+        flow_in_store,
     })
 }
 

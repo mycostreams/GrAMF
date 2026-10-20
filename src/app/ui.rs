@@ -1,6 +1,7 @@
 use super::annotate::{self, AnnotationState, Choice};
 use super::dev_panel::{self, DevState};
 use super::export_dialog::{self, ExportDialog};
+use super::registration::{self, Registration, Workflow};
 use super::settings_window::{self, SettingsWindow};
 use crate::annotations::{Op, Target};
 use crate::colour::{Cmap, ColourBy, Scale};
@@ -142,6 +143,9 @@ pub struct FrameState<'a> {
     pub unreachable_trails: &'a [String],
     /// Text drawn on the map (e.g. trail names), in points.
     pub map_texts: &'a [(egui::Pos2, String, egui::Color32)],
+    pub workflow: &'a mut Workflow,
+    /// The plate's video runs, when found.
+    pub reg: Option<&'a mut Registration>,
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -159,6 +163,8 @@ pub struct UiActions {
     pub choice: Option<Choice>,
     pub export: bool,
     pub evidence_toggled: bool,
+    /// Pick the folder with the plate's video runs.
+    pub choose_videos: bool,
     pub fit: bool,
     /// The inspector's Raw rows section is open: keep the rows for the selected edge loaded.
     pub raw_wanted: bool,
@@ -168,8 +174,9 @@ pub struct UiActions {
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal, settings_window, unreachable_trails, map_texts } =
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal, settings_window, unreachable_trails, map_texts, workflow, mut reg } =
         frame;
+    let registering = *workflow == Workflow::Registration;
     let mut actions = UiActions::default();
 
     // Shortcuts; single-letter tool keys only while no text field has focus. On macOS the
@@ -269,16 +276,32 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                 ui.separator();
             });
         });
-        if let Some(st) = annot.as_deref_mut() {
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.selectable_value(workflow, Workflow::Visualize, "Visualize and clean up");
+            ui.selectable_value(workflow, Workflow::Registration, "Video registration");
             ui.separator();
-            annotate::toolbar(ui, st);
-        }
+            match (registering, annot.as_deref_mut()) {
+                (false, Some(st)) => annotate::toolbar(ui, st),
+                (true, _) => {
+                    ui.label(egui::RichText::new("placement and matching tools arrive in the next milestones").weak());
+                }
+                _ => (),
+            }
+        });
     });
 
-    let timeline = timeline.map(|t| {
-        egui::Panel::bottom("timeline").show_inside(ui, |ui| timeline_bar(ui, t));
-        &*t
-    });
+    // Registration: the run slider replaces the timeline; the STG time follows the run.
+    let timeline = match (registering, reg.as_deref_mut()) {
+        (true, Some(r)) => {
+            egui::Panel::bottom("runs").show_inside(ui, |ui| registration::run_bar(ui, r));
+            timeline.map(|t| &*t)
+        }
+        _ => timeline.map(|t| {
+            egui::Panel::bottom("timeline").show_inside(ui, |ui| timeline_bar(ui, t));
+            &*t
+        }),
+    };
 
     if dev.open {
         egui::Panel::bottom("developer")
@@ -296,13 +319,23 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
     } else {
     egui::Panel::left("layers").show_inside(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.heading("Layers");
+            if !registering {
+                ui.heading("Layers");
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("«").on_hover_text("hide Layers").clicked() {
+                if ui.small_button("«").on_hover_text("hide this panel").clicked() {
                     layers.left_open = false;
                 }
             });
         });
+        if registering {
+            if let Some(store) = store {
+                if let registration::Action::ChooseFolder = registration::left_panel(ui, reg.as_deref_mut(), store) {
+                    actions.choose_videos = true;
+                }
+            }
+            return;
+        }
         let before = layers.colour_by;
         egui::ComboBox::from_label("colour")
             .selected_text(layers.colour_by.name())
@@ -352,9 +385,14 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             if ui.small_button("»").on_hover_text("hide Inspector").clicked() {
                 layers.right_open = false;
             }
-            ui.heading("Inspector");
+            ui.heading(if registering { "Run" } else { "Inspector" });
         });
         ui.separator();
+        if registering {
+            let unit = timeline.map_or(TimeUnit::Utc, |t| t.unit);
+            registration::right_panel(ui, reg.as_deref_mut(), timeline.map(|t| &t.axis), unit);
+            return;
+        }
         match (store, selection) {
             (Some(store), Some(sel)) => {
                 egui::ScrollArea::vertical().show(ui, |ui| {
