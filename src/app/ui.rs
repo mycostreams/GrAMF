@@ -144,6 +144,8 @@ pub struct FrameState<'a> {
     /// Text drawn on the map (e.g. trail names), in points.
     pub map_texts: &'a [(egui::Pos2, String, egui::Color32)],
     pub workflow: &'a mut Workflow,
+    /// The user's added edges as segments, for matching video edges onto them.
+    pub added_segments: &'a [crate::matching::AddedSegment],
     /// The plate's video runs, when found.
     pub reg: Option<&'a mut Registration>,
 }
@@ -176,7 +178,7 @@ pub struct UiActions {
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal, settings_window, unreachable_trails, map_texts, workflow, mut reg } =
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal, settings_window, unreachable_trails, map_texts, workflow, added_segments, mut reg } =
         frame;
     let registering = *workflow == Workflow::Registration;
     let mut actions = UiActions::default();
@@ -405,7 +407,11 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         ui.separator();
         if registering {
             let unit = timeline.map_or(TimeUnit::Utc, |t| t.unit);
-            registration::right_panel(ui, reg.as_deref_mut(), timeline.map(|t| &t.axis), unit);
+            if let Some(store) = store {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    registration::right_panel(ui, reg.as_deref_mut(), timeline.map(|t| &t.axis), unit, store, added_segments);
+                });
+            }
             return;
         }
         match (store, selection) {

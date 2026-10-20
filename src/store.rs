@@ -440,6 +440,18 @@ impl Store {
             .collect()
     }
 
+    /// True when edge `e`'s arc runs node2 -> node1 of `/edges` (a few percent of edges).
+    pub fn arc_reversed(&self, e: usize) -> bool {
+        let (Some(&[n1, n2]), Some(first)) = (self.edge_nodes.get(e), self.arcs.points.get(self.arcs.offsets[e])) else {
+            return false;
+        };
+        let d = |id: &i64| self.node_index.get(id).map_or(f32::INFINITY, |&n| {
+            let p = self.node_pos[n];
+            (p[0] - first[0]).hypot(p[1] - first[1])
+        });
+        d(&n2) < d(&n1)
+    }
+
     pub fn grid(&self) -> &SegmentGrid {
         self.segment_grid.get_or_init(|| SegmentGrid::build(&self.arcs))
     }
