@@ -2,7 +2,9 @@
 //! left, the selected position's runs on the right, a run slider at the bottom, videos placed
 //! on the map. Matching (R4) and corrections (R5) come later.
 
-use crate::placement::{self, FitKind, Similarity};
+use crate::flow::RunFlow;
+use crate::matching::{self, AddedSegment, EdgeCover, EdgeRef, Rigid};
+use crate::placement::{self, Similarity};
 use crate::settings::SetupDefault;
 use crate::store::Store;
 use crate::time::{TimeAxis, TimeUnit};
@@ -20,11 +22,33 @@ pub enum RegTool {
     Anchor,
 }
 
+/// One run matched onto the STG: its snap, each video edge's placed (snapped) trail and cover,
+/// and its flow values.
+pub struct RunMatch {
+    /// `None`: snap refused (too little to fit on, or an implausibly large move).
+    pub snap: Option<Rigid>,
+    pub placed: Vec<Vec<[f32; 2]>>,
+    pub covers: Vec<EdgeCover>,
+    pub flow: Result<RunFlow, String>,
+}
+
+/// Distinct colours for a run's video edges (and their STG chains).
+pub const EDGE_COLOURS: [Color32; 8] = [
+    Color32::from_rgb(80, 220, 240),
+    Color32::from_rgb(240, 150, 40),
+    Color32::from_rgb(170, 120, 240),
+    Color32::from_rgb(110, 220, 110),
+    Color32::from_rgb(240, 100, 160),
+    Color32::from_rgb(240, 220, 80),
+    Color32::from_rgb(120, 160, 255),
+    Color32::from_rgb(255, 120, 90),
+];
+const GAP: Color32 = Color32::from_rgb(240, 170, 40);
+
 /// A session's placement: the stage-to-STG transform, how it came about, and each anchor's
 /// residual (position, µm).
 pub struct SessionFit {
     pub sim: Similarity,
-    pub kind: FitKind,
     /// No anchors of its own: carried over from the previous session.
     pub inherited: bool,
     pub residuals: Vec<(usize, f64)>,
@@ -64,6 +88,13 @@ pub struct Registration {
     graphs: HashMap<String, Option<Rc<VideoGraph>>>,
     /// Fit score per session, with the (transform, camera) it was computed for.
     scores: HashMap<usize, (String, Option<f32>)>,
+    /// Distance (µm) within which a video edge counts as lying on an STG edge.
+    pub threshold: f32,
+    pub snap_enabled: bool,
+    /// The selected video edge of the selected run.
+    pub video_edge: Option<[i64; 3]>,
+    /// Matched runs by run path, with the inputs they were matched with.
+    matches: HashMap<String, (String, Rc<RunMatch>)>,
 }
 
 impl Registration {
@@ -86,7 +117,48 @@ impl Registration {
             trust_default_offset,
             graphs: HashMap::new(),
             scores: HashMap::new(),
+            threshold: 10.0,
+            snap_enabled: true,
+            video_edge: None,
+            matches: HashMap::new(),
         }
+    }
+
+    /// Run `run` of position `p` matched onto the STG under `sim`, recomputed only when the
+    /// transform, camera, threshold, snap switch or added edges change.
+    pub fn run_match(&mut self, p: usize, run: usize, sim: &Similarity, store: &Store, added: &[AddedSegment]) -> Option<Rc<RunMatch>> {
+        let rel = self.videos.positions[p].runs[run].rel_path.clone();
+        let key = format!("{sim:?}/{}/{}/{}/{}", self.camera, self.threshold, self.snap_enabled, added.len());
+        if let Some((k, m)) = self.matches.get(&rel) {
+            if *k == key {
+                return Some(m.clone());
+            }
+        }
+        let graph = self.graph(p, run)?;
+        let stage = self.videos.positions[p].stage_mm;
+        let raw: Vec<Vec<[f32; 2]>> = graph
+            .edges
+            .iter()
+            .map(|e| e.points.iter().map(|&q| placement::place(sim, self.camera, stage, q)).collect())
+            .collect();
+        let snap = if self.snap_enabled {
+            let samples: Vec<[f32; 2]> = raw.iter().flat_map(|e| e.iter().step_by(5).copied()).collect();
+            matching::snap(store, &samples)
+        } else {
+            None
+        };
+        let rigid = snap.unwrap_or_default();
+        let placed: Vec<Vec<[f32; 2]>> = raw.iter().map(|e| e.iter().map(|&q| rigid.apply(q)).collect()).collect();
+        let covers = graph
+            .edges
+            .iter()
+            .zip(&placed)
+            .map(|(e, pts)| matching::cover(store, added, e.key, pts, self.threshold))
+            .collect();
+        let flow = crate::flow::read(&self.videos.root.join(&rel));
+        let m = Rc::new(RunMatch { snap, placed, covers, flow });
+        self.matches.insert(rel, (key, m.clone()));
+        Some(m)
     }
 
     /// Every session's fit, in order: anchors refine the previous session's fit (the setup
@@ -101,22 +173,18 @@ impl Registration {
             let pairs: Vec<([f64; 2], [f64; 2])> =
                 anchored.iter().map(|&p| (self.videos.positions[p].stage_mm, self.anchors[&p])).collect();
             let fit = if !pairs.is_empty() {
-                let (sim, kind, res) = placement::fit(&pairs, base);
-                Some(SessionFit { sim, kind, inherited: false, residuals: anchored.into_iter().zip(res).collect() })
+                let (sim, _, res) = placement::fit(&pairs, base);
+                Some(SessionFit { sim, inherited: false, residuals: anchored.into_iter().zip(res).collect() })
             } else if let Some(sim) = previous {
-                Some(SessionFit { sim, kind: FitKind::Default, inherited: true, residuals: vec![] })
+                Some(SessionFit { sim, inherited: true, residuals: vec![] })
             } else if self.trust_default_offset {
-                self.default.map(|sim| SessionFit { sim, kind: FitKind::Default, inherited: false, residuals: vec![] })
+                self.default.map(|sim| SessionFit { sim, inherited: false, residuals: vec![] })
             } else {
                 None
             };
             out.push(fit);
         }
         out
-    }
-
-    pub fn session_of(&self, p: usize) -> Option<usize> {
-        self.sessions.iter().position(|s| s.positions.contains(&p))
     }
 
     pub fn session_key(&self, i: usize) -> Option<String> {
@@ -423,7 +491,14 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
 }
 
 /// Right panel: the selected position and its runs.
-pub fn right_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, axis: Option<&TimeAxis>, unit: TimeUnit) {
+pub fn right_panel(
+    ui: &mut egui::Ui,
+    reg: Option<&mut Registration>,
+    axis: Option<&TimeAxis>,
+    unit: TimeUnit,
+    store: &Store,
+    added: &[AddedSegment],
+) {
     ui.heading("Position");
     let Some(reg) = reg else {
         return;
@@ -475,15 +550,22 @@ pub fn right_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, axis: Opti
             row(ui, "in store", if reg.mapped_in_store.contains(&run.rel_path) { "mapped".into() } else { "no".into() });
         });
     }
-    ui.separator();
-    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-        for (i, run) in pos.runs.iter().enumerate() {
-            let mark = if reg.mapped_in_store.contains(&run.rel_path) { " · mapped" } else { "" };
-            if ui.selectable_label(reg.run == i, format!("{} · {}{mark}", utc(run.utc), run.mode)).clicked() {
-                reg.run = i;
+    let n_runs = pos.runs.len();
+    let mut chosen = None;
+    egui::CollapsingHeader::new(format!("All runs ({n_runs})")).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+            for (i, run) in pos.runs.iter().enumerate() {
+                let mark = if reg.mapped_in_store.contains(&run.rel_path) { " · mapped" } else { "" };
+                if ui.selectable_label(reg.run == i, format!("{} · {}{mark}", utc(run.utc), run.mode)).clicked() {
+                    chosen = Some(i);
+                }
             }
-        }
+        });
     });
+    if let Some(i) = chosen {
+        reg.run = i;
+    }
+    edges_section(ui, reg, store, added);
 }
 
 /// Bottom bar: step through the selected position's runs; the STG time follows the run.
@@ -515,17 +597,23 @@ pub fn toolbar(ui: &mut egui::Ui, reg: &mut Registration) {
         }
     }
     ui.separator();
+    ui.add(egui::DragValue::new(&mut reg.threshold).range(2.0..=40.0).speed(0.2).suffix(" µm").prefix("threshold "))
+        .on_hover_text("how close a video edge must lie to an STG edge to count as on it");
+    ui.checkbox(&mut reg.snap_enabled, "snap").on_hover_text("nudge each run onto the STG with a small rigid fit");
+    ui.separator();
     let hint = match (reg.tool, reg.position) {
-        (RegTool::Select, _) => "click a video on the map, or a dot in the stage scatter",
+        (RegTool::Select, None) => "click a video on the map, or a dot in the stage scatter",
+        (RegTool::Select, Some(_)) => "click a video edge to see its STG chain and flow",
         (RegTool::Anchor, None) => "select a position first (stage scatter or map)",
         (RegTool::Anchor, Some(_)) => "click the STG where this video's centre belongs (snaps to a node within 10 px)",
     };
     ui.label(egui::RichText::new(hint).weak());
 }
 
-/// Placed videos of the selected session, in points: each shown run's graph (the selected
-/// position bright), its frame outline, and anchors with a line to their video's centre.
-pub fn overlay(reg: &mut Registration, to_pt: impl Fn([f32; 2]) -> Pos2) -> Vec<egui::Shape> {
+/// Placed videos of the selected session, in points: each shown run's snapped graph and frame
+/// outline; for the selected position every video edge in its own colour, with its STG chain
+/// in the same colour and its gaps dashed; anchors with a line to their video's centre.
+pub fn overlay(reg: &mut Registration, store: &Store, added: &[AddedSegment], to_pt: impl Fn([f32; 2]) -> Pos2) -> Vec<egui::Shape> {
     use egui::Shape;
     let fits = reg.fits();
     let Some(Some(fit)) = fits.get(reg.session) else {
@@ -541,14 +629,34 @@ pub fn overlay(reg: &mut Registration, to_pt: impl Fn([f32; 2]) -> Pos2) -> Vec<
             (pos.stage_mm, pos.runs[run].frame_size, pos.runs[run].delta_x_um)
         };
         let selected = reg.position == Some(p);
-        let colour = if selected { Color32::from_rgb(80, 220, 240) } else { Color32::from_rgba_unmultiplied(150, 190, 230, 150) };
-        let place = |q: [f32; 2]| to_pt(placement::place(&sim, camera, stage, q));
+        let faint = Color32::from_rgba_unmultiplied(150, 190, 230, 150);
+        let Some(m) = reg.run_match(p, run, &sim, store, added) else { continue };
+        let rigid = m.snap.unwrap_or_default();
+        let place = |q: [f32; 2]| to_pt(rigid.apply(placement::place(&sim, camera, stage, q)));
         let (hw, hh) = (frame[1] as f32 * dx / 2.0, frame[0] as f32 * dx / 2.0);
         let corners: Vec<Pos2> = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh], [-hw, -hh]].into_iter().map(place).collect();
-        shapes.extend(Shape::dashed_line(&corners, Stroke::new(1.0, colour), 4.0, 3.0));
-        if let Some(g) = reg.graph(p, run) {
-            for e in &g.edges {
-                shapes.push(Shape::line(e.points.iter().map(|&q| place(q)).collect(), Stroke::new(if selected { 2.5 } else { 1.5 }, colour)));
+        let outline = if selected { Color32::from_rgb(80, 220, 240) } else { faint };
+        shapes.extend(Shape::dashed_line(&corners, Stroke::new(1.0, outline), 4.0, 3.0));
+        for (i, (pts, cover)) in m.placed.iter().zip(&m.covers).enumerate() {
+            let line: Vec<Pos2> = pts.iter().map(|&q| to_pt(q)).collect();
+            if !selected {
+                shapes.push(Shape::line(line, Stroke::new(1.5, faint)));
+                continue;
+            }
+            let colour = EDGE_COLOURS[i % EDGE_COLOURS.len()];
+            let chosen = reg.video_edge == Some(cover.key);
+            for &(e, _) in &cover.chain {
+                let stg: Vec<Pos2> = match e {
+                    EdgeRef::Pipeline(e) => store.arcs.points[store.arcs.offsets[e]..store.arcs.offsets[e + 1]].iter().map(|&q| to_pt(q)).collect(),
+                    EdgeRef::Added(id) => added.iter().filter(|a| a.id == id).flat_map(|a| [to_pt(a.a), to_pt(a.b)]).collect(),
+                };
+                let a = if chosen { 200 } else { 110 };
+                shapes.push(Shape::line(stg, Stroke::new(if chosen { 6.0 } else { 4.0 }, Color32::from_rgba_unmultiplied(colour.r(), colour.g(), colour.b(), a))));
+            }
+            shapes.push(Shape::line(line, Stroke::new(if chosen { 3.5 } else { 2.0 }, colour)));
+            for gap in &cover.gaps {
+                let g: Vec<Pos2> = gap.iter().map(|&q| to_pt(q)).collect();
+                shapes.extend(Shape::dashed_line(&g, Stroke::new(3.0, GAP), 5.0, 4.0));
             }
         }
         if let Some(&a) = reg.anchors.get(&p) {
@@ -564,21 +672,121 @@ pub fn overlay(reg: &mut Registration, to_pt: impl Fn([f32; 2]) -> Pos2) -> Vec<
     shapes
 }
 
-/// Selects the position whose placed video graph passes nearest `at` (µm), within `radius`.
-pub fn pick_video(reg: &mut Registration, at: [f32; 2], radius: f32) -> Option<usize> {
+/// A click with the Select tool: the selected position's video edge under `at` (µm) when
+/// there is one, else the position whose placed video passes nearest.
+pub fn pick(reg: &mut Registration, store: &Store, added: &[AddedSegment], at: [f32; 2], radius: f32) {
     let fits = reg.fits();
-    let fit = fits.get(reg.session)?.as_ref()?;
-    let mut best: Option<(f32, usize)> = None;
-    for p in reg.sessions[reg.session].positions.clone() {
-        let stage = reg.videos.positions[p].stage_mm;
-        let Some(g) = reg.graph(p, reg.shown_run(p)) else { continue };
-        for q in g.edges.iter().flat_map(|e| e.points.iter()) {
-            let w = placement::place(&fit.sim, reg.camera, stage, *q);
-            let d = ((w[0] - at[0]).powi(2) + (w[1] - at[1]).powi(2)).sqrt();
-            if d <= radius && best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, p));
+    let Some(Some(fit)) = fits.get(reg.session) else { return };
+    let sim = fit.sim;
+    let d = |pts: &[[f32; 2]]| pts.windows(2).map(|w| crate::store::segment_dist2(at, w[0], w[1]).sqrt()).fold(f32::INFINITY, f32::min);
+    if let Some(p) = reg.position {
+        let run = reg.shown_run(p);
+        if let Some(m) = reg.run_match(p, run, &sim, store, added) {
+            let hit = m.placed.iter().zip(&m.covers).map(|(pts, c)| (d(pts), c.key)).filter(|x| x.0 <= radius).min_by(|a, b| a.0.total_cmp(&b.0));
+            if let Some((_, key)) = hit {
+                reg.video_edge = Some(key);
+                return;
             }
         }
     }
-    best.map(|(_, p)| p)
+    let mut best: Option<(f32, usize)> = None;
+    for p in reg.sessions[reg.session].positions.clone() {
+        let run = reg.shown_run(p);
+        let Some(m) = reg.run_match(p, run, &sim, store, added) else { continue };
+        let dist = m.placed.iter().map(|pts| d(pts)).fold(f32::INFINITY, f32::min);
+        if dist <= radius && best.is_none_or(|(bd, _)| dist < bd) {
+            best = Some((dist, p));
+        }
+    }
+    if let Some((_, p)) = best {
+        if reg.position != Some(p) {
+            reg.position = Some(p);
+            reg.run = reg.shown_run(p);
+            reg.video_edge = None;
+        }
+    }
+}
+
+/// The selected run's video edges: coverage and chain per edge, the selected edge's chain and
+/// flow values, and the snap.
+pub fn edges_section(ui: &mut egui::Ui, reg: &mut Registration, store: &Store, added: &[AddedSegment]) {
+    let Some(p) = reg.position else { return };
+    let fits = reg.fits();
+    let Some(Some(fit)) = fits.get(reg.session) else {
+        ui.label(egui::RichText::new("place the session to match its videos").weak());
+        return;
+    };
+    let run = reg.shown_run(p);
+    let Some(m) = reg.run_match(p, run, &fit.sim, store, added) else {
+        ui.colored_label(Color32::LIGHT_RED, "could not read this run's video graph");
+        return;
+    };
+    ui.separator();
+    match m.snap {
+        Some(r) => ui.label(format!("snap: {:.1}, {:.1} µm · {:.2}°", r.shift[0], r.shift[1], r.theta.to_degrees())),
+        None if reg.snap_enabled => ui.colored_label(Color32::YELLOW, "snap refused (too little STG nearby, or a large move)"),
+        None => ui.label(egui::RichText::new("snap off").weak()),
+    };
+    let flow = m.flow.as_ref().ok();
+    if let Err(e) = &m.flow {
+        ui.colored_label(Color32::LIGHT_RED, format!("flow: {e}"));
+    }
+    ui.strong("Video edges");
+    egui::Grid::new("video_edges").num_columns(4).striped(true).show(ui, |ui| {
+        for (i, c) in m.covers.iter().enumerate() {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 2.0, EDGE_COLOURS[i % EDGE_COLOURS.len()]);
+            let has_flow = flow.is_some_and(|f| f.contains_key(&c.key));
+            let label = format!("({}, {}, {})", c.key[0], c.key[1], c.key[2]);
+            if ui.selectable_label(reg.video_edge == Some(c.key), label).clicked() {
+                reg.video_edge = Some(c.key);
+            }
+            let cov = format!("{:.0}%", c.coverage * 100.0);
+            ui.label(if c.coverage < 0.9 { egui::RichText::new(cov).color(GAP) } else { egui::RichText::new(cov) });
+            let chain = match (c.chain.len(), has_flow) {
+                (0, _) => "no STG".to_string(),
+                (n, true) => format!("{n} STG"),
+                (n, false) => format!("{n} STG · no flow"),
+            };
+            ui.label(egui::RichText::new(chain).small());
+            ui.end_row();
+        }
+    });
+    let Some(c) = reg.video_edge.and_then(|k| m.covers.iter().find(|c| c.key == k)) else { return };
+    ui.separator();
+    ui.strong(format!("Video edge ({}, {}, {})", c.key[0], c.key[1], c.key[2]));
+    let chain: Vec<String> = c
+        .chain
+        .iter()
+        .map(|(e, dir)| {
+            let id = match e {
+                EdgeRef::Pipeline(e) => e.to_string(),
+                EdgeRef::Added(id) => format!("{id} (added)"),
+            };
+            format!("{id}{}", if *dir > 0 { "" } else { " (reversed)" })
+        })
+        .collect();
+    ui.label(egui::RichText::new(format!("STG chain: {}", if chain.is_empty() { "none".into() } else { chain.join(", ") })).small())
+        .on_hover_text("in order from the video edge's u to v; reversed = the video runs node2 -> node1 of that STG edge");
+    match flow.and_then(|f| f.get(&c.key)) {
+        None => {
+            ui.label(egui::RichText::new("no flow analysed for this edge").weak());
+        }
+        Some(dirs) => {
+            egui::Grid::new("flow_values").num_columns(3).show(ui, |ui| {
+                ui.label("");
+                for d in dirs {
+                    ui.label(egui::RichText::new(if d.dir == c.key { "u to v" } else { "v to u" }).strong());
+                }
+                ui.end_row();
+                for (k, name) in crate::flow::VALUE_NAMES.iter().enumerate() {
+                    ui.label(egui::RichText::new(*name).weak());
+                    for d in dirs {
+                        ui.monospace(format!("{:.3}", d.values[k]));
+                    }
+                    ui.end_row();
+                }
+            });
+        }
+    }
 }

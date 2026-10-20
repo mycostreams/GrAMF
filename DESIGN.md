@@ -292,6 +292,13 @@ lines of real logic and ~1,700 of UI. GrAMF does **not** port its workflow one-t
    within a threshold (default 10 µm), form its **chain**, each with a direction from the
    shared tangent. Stretches on no edge are **gaps**, drawn dashed amber. Poorly covered edges
    are flagged, never forced onto something.
+4. As built (R4): snap is ICP (rotation about the centroid + translation, 20 iterations,
+   30 then 12 µm pairing radius) and is refused beyond 50 µm or 5°; cover samples every 2 µm
+   and drops chain members covered for less than 6 µm (unless that is all an edge has); gaps
+   are drawn from 5 µm. Directions are relative to `/edges` (node1 -> node2), checked per edge
+   because ~3 % of arcs are stored node2 -> node1. On FLW2605A003 the snap moves runs 3-9 µm
+   and most video edges are 100 % covered. Flow values come from `flow_analysis.parquet`
+   (`edge_*` columns, first row per edge and direction; registrator's repairs applied).
 
 ### Corrections (per run, by decision)
 

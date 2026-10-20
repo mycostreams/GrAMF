@@ -522,12 +522,8 @@ impl App {
                 reg.anchors.insert(p, [w[0] as f64, w[1] as f64]);
             }
             _ => {
-                if let Some(p) = registration::pick_video(reg, at, PICK_RADIUS_PX * renderer.um_per_px()) {
-                    if reg.position != Some(p) {
-                        reg.position = Some(p);
-                        reg.run = reg.shown_run(p);
-                    }
-                }
+                let added = added_segments(store, self.annot.as_ref());
+                registration::pick(reg, store, &added, at, PICK_RADIUS_PX * renderer.um_per_px());
             }
         }
     }
@@ -717,6 +713,16 @@ fn reveal_in_file_manager(path: &Path) {
 
 fn ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0
+}
+
+/// The user's own added edges as straight segments (matching includes them).
+fn added_segments(store: &Store, annot: Option<&AnnotationState>) -> Vec<crate::matching::AddedSegment> {
+    let pos = |id: &i64| store.node_index.get(id).map(|&n| store.node_pos[n]);
+    annot
+        .into_iter()
+        .flat_map(|st| &st.own.added)
+        .filter_map(|e| Some(crate::matching::AddedSegment { id: e.id, a: pos(&e.u)?, b: pos(&e.v)? }))
+        .collect()
 }
 
 /// The user's own annotation file for the store at `path` (new if absent) and everyone
@@ -1105,8 +1111,10 @@ impl ApplicationHandler for App {
                     egui::pos2(x / ppp, y / ppp)
                 };
                 let registering = self.workflow == registration::Workflow::Registration;
+                let added_segments =
+                    self.store.as_ref().map_or_else(Vec::new, |s| added_segments(s, self.annot.as_ref()));
                 let overlay = match (registering, self.store.as_ref(), self.annot.as_ref(), self.reg.as_mut()) {
-                    (true, _, _, Some(reg)) => registration::overlay(reg, to_pt),
+                    (true, Some(store), _, Some(reg)) => registration::overlay(reg, store, &added_segments, to_pt),
                     (false, Some(store), Some(st), _) => annotate::overlay(store, st, renderer.time, selected_added, to_pt),
                     _ => vec![],
                 };
@@ -1174,6 +1182,7 @@ impl ApplicationHandler for App {
                             unreachable_trails: &unreachable_trails,
                             map_texts: &map_texts,
                             workflow: &mut self.workflow,
+                            added_segments: &added_segments,
                             reg: self.reg.as_mut(),
                         },
                     );
