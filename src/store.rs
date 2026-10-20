@@ -70,6 +70,57 @@ pub struct Store {
     /// The registrator's flow layer in this store (`/flow_runs`, `/flow_measurements`), shown
     /// read-only until it is imported.
     pub flow_in_store: Option<FlowLayer>,
+    /// Grid over arc segments for nearest-arc queries; built on first use.
+    pub segment_grid: std::sync::OnceLock<SegmentGrid>,
+}
+
+/// Arc segments bucketed in square cells, for "nearest STG arc within r" queries.
+pub struct SegmentGrid {
+    cell: f32,
+    /// Cell -> first vertex of each segment (`v`, `v + 1`) touching it.
+    cells: HashMap<(i32, i32), Vec<u32>>,
+}
+
+impl SegmentGrid {
+    const CELL_UM: f32 = 50.0;
+
+    fn build(arcs: &Arcs) -> Self {
+        let cell = Self::CELL_UM;
+        let mut cells: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
+        for e in arcs.offsets.windows(2) {
+            for v in e[0]..e[1].saturating_sub(1) {
+                let (a, b) = (arcs.points[v], arcs.points[v + 1]);
+                let lo = ((a[0].min(b[0]) / cell).floor() as i32, (a[1].min(b[1]) / cell).floor() as i32);
+                let hi = ((a[0].max(b[0]) / cell).floor() as i32, (a[1].max(b[1]) / cell).floor() as i32);
+                for x in lo.0..=hi.0 {
+                    for y in lo.1..=hi.1 {
+                        cells.entry((x, y)).or_default().push(v as u32);
+                    }
+                }
+            }
+        }
+        Self { cell, cells }
+    }
+
+    /// Distance from `p` to the nearest arc segment, if one lies within `max` µm, and that
+    /// segment's first vertex.
+    pub fn nearest(&self, arcs: &Arcs, p: [f32; 2], max: f32) -> Option<(f32, usize)> {
+        let r = (max / self.cell).ceil() as i32;
+        let (cx, cy) = ((p[0] / self.cell).floor() as i32, (p[1] / self.cell).floor() as i32);
+        let mut best: Option<(f32, usize)> = None;
+        for x in cx - r..=cx + r {
+            for y in cy - r..=cy + r {
+                for &v in self.cells.get(&(x, y)).into_iter().flatten() {
+                    let v = v as usize;
+                    let d = segment_dist2(p, arcs.points[v], arcs.points[v + 1]).sqrt();
+                    if d <= max && best.is_none_or(|(bd, _)| d < bd) {
+                        best = Some((d, v));
+                    }
+                }
+            }
+        }
+        best
+    }
 }
 
 pub struct FlowLayer {
@@ -300,6 +351,7 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         edge_by_nodes,
         trails_in_store,
         flow_in_store,
+        segment_grid: Default::default(),
     })
 }
 
@@ -386,6 +438,10 @@ impl Store {
         (0..self.edge_nodes.len())
             .filter(|&e| self.edge_nodes[e].contains(&id))
             .collect()
+    }
+
+    pub fn grid(&self) -> &SegmentGrid {
+        self.segment_grid.get_or_init(|| SegmentGrid::build(&self.arcs))
     }
 
     /// Shortest path (by arc length) through every waypoint in turn, over the STG plus
@@ -589,6 +645,17 @@ fn arcs_from_raw(offsets: &[i64], flat_points: &[f64]) -> Result<Arcs, String> {
 #[cfg(test)]
 mod tests {
     use super::{dijkstra, WidthSegment, WidthTimestep, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs, width_table};
+
+    #[test]
+    fn grid_finds_the_nearest_segment() {
+        let pts = [0.0, 0.0, 100.0, 0.0, 0.0, 200.0, 0.0, 300.0];
+        let arcs = arcs_from_raw(&[0, 2, 4], &pts).unwrap();
+        let grid = super::SegmentGrid::build(&arcs);
+        let (d, v) = grid.nearest(&arcs, [50.0, 3.0], 10.0).unwrap();
+        assert_eq!((d, v), (3.0, 0));
+        assert_eq!(grid.nearest(&arcs, [4.0, 250.0], 10.0).map(|x| x.1), Some(2));
+        assert!(grid.nearest(&arcs, [50.0, 60.0], 10.0).is_none());
+    }
 
     #[test]
     fn dijkstra_takes_the_shorter_way() {

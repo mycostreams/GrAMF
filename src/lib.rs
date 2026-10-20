@@ -3,6 +3,7 @@ pub mod app;
 pub mod colour;
 pub mod devtools;
 pub mod export;
+pub mod placement;
 pub mod registry;
 pub mod settings;
 pub mod renderer;

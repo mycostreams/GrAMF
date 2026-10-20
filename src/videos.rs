@@ -75,6 +75,51 @@ pub struct Session {
     pub end: i64,
 }
 
+/// A run's extracted video graph: each edge's pixel trail in µm, relative to the frame centre,
+/// in the camera's own axes (`placement::camera_orient` turns them into stage axes).
+pub struct VideoGraph {
+    pub edges: Vec<VideoEdge>,
+}
+
+pub struct VideoEdge {
+    /// `(u, v, k)` in the video graph, as the flow analysis keys it.
+    pub key: [i64; 3],
+    pub points: Vec<[f32; 2]>,
+}
+
+/// Loads `extraction_graph.json` of `run` under `root`.
+pub fn load_graph(root: &Path, run: &Run) -> Result<VideoGraph, String> {
+    let dir = root.join(&run.rel_path);
+    let file = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().ends_with("extraction_graph.json")))
+        .ok_or("no extraction_graph.json")?;
+    let g: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let centre = [run.frame_size[1] as f32 / 2.0, run.frame_size[0] as f32 / 2.0];
+    let edges = g["edges"]
+        .as_array()
+        .ok_or("no edges")?
+        .iter()
+        .filter_map(|e| {
+            let key = e["edge"].as_array()?;
+            let points: Vec<[f32; 2]> = e["pixel_list"]
+                .as_array()?
+                .iter()
+                .filter_map(|p| {
+                    let (a, b) = (p[0].as_f64()? as f32, p[1].as_f64()? as f32);
+                    Some([(a - centre[0]) * run.delta_x_um, (b - centre[1]) * run.delta_x_um])
+                })
+                .collect();
+            let key = [key.first()?.as_i64()?, key.get(1)?.as_i64()?, key.get(2).and_then(|k| k.as_i64()).unwrap_or(0)];
+            (points.len() >= 2).then_some(VideoEdge { key, points })
+        })
+        .collect();
+    Ok(VideoGraph { edges })
+}
+
 /// `x_n10_38_y_4_484` -> (-10.38, 4.484): `n` is a minus sign, `_` the decimal point.
 pub fn parse_position_name(name: &str) -> Option<[f64; 2]> {
     let rest = name.strip_prefix("x_")?;
