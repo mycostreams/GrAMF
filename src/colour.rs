@@ -23,6 +23,19 @@ impl ColourBy {
     }
 }
 
+/// A colormap and its direction.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scale {
+    pub cmap: Cmap,
+    pub reversed: bool,
+}
+
+impl Scale {
+    pub fn sample(self, x: f32) -> [f32; 4] {
+        self.cmap.sample(if self.reversed { 1.0 - x } else { x })
+    }
+}
+
 const UNIFORM: [f32; 4] = [0.75, 0.9, 0.6, 1.0];
 const MISSING: [f32; 4] = [0.35, 0.35, 0.35, 1.0];
 pub const HIGHLIGHT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
@@ -112,14 +125,43 @@ fn quantile(values: impl Iterator<Item = f32>, q: f32) -> Option<f32> {
     v.get(((v.len() as f32 - 1.0) * q).round() as usize).copied()
 }
 
-/// Width colour range: 5-95 % of measured widths, so outliers don't flatten the scale.
+/// Width colour range: 5-95 % of measured widths (per-timestep when the store has them), so
+/// outliers don't flatten the scale. Fixed over time, so colours compare across frames.
 pub fn width_range(store: &Store) -> Option<(f32, f32)> {
+    if let Some([lo, _, hi]) = store.width_t_quantiles {
+        return Some((lo, hi));
+    }
     let widths = || store.width.iter().flatten().map(|w| w.0);
     Some((quantile(widths(), 0.05)?, quantile(widths(), 0.95)?))
 }
 
-/// One colour per arc vertex.
-pub fn vertex_colours(store: &Store, by: ColourBy, cmap: Cmap, n_timepoints: usize) -> Vec<[f32; 4]> {
+/// Typical width (µm), drawn at the base line thickness when thickness follows width.
+pub fn reference_width(store: &Store) -> f32 {
+    store
+        .width_t_quantiles
+        .map(|q| q[1])
+        .or_else(|| quantile(store.width.iter().flatten().map(|w| w.0), 0.5))
+        .unwrap_or(0.0)
+}
+
+/// Per edge `[r, g, b, width_um]` at timepoint `t`: the colour is used in width mode, the
+/// width for line thickness. Unknown width is 0 (drawn at base thickness, grey).
+pub fn edge_styles(store: &Store, t: Option<usize>, scale: Scale) -> Vec<[f32; 4]> {
+    let range = width_range(store);
+    (0..store.n_edges())
+        .map(|e| match (store.width_at(e, t), range) {
+            (Some(w), Some((lo, hi))) => {
+                let [r, g, b, _] = scale.sample((w - lo) / (hi - lo).max(1e-6));
+                [r, g, b, w]
+            }
+            (Some(w), None) => [MISSING[0], MISSING[1], MISSING[2], w],
+            (None, _) => [MISSING[0], MISSING[1], MISSING[2], 0.0],
+        })
+        .collect()
+}
+
+/// One colour per arc vertex (all modes but width).
+pub fn vertex_colours(store: &Store, by: ColourBy, cmap: Scale, n_timepoints: usize) -> Vec<[f32; 4]> {
     let per_edge = |edge_colour: &dyn Fn(usize) -> [f32; 4]| -> Vec<[f32; 4]> {
         store
             .arcs
@@ -135,15 +177,8 @@ pub fn vertex_colours(store: &Store, by: ColourBy, cmap: Cmap, n_timepoints: usi
             let last = n_timepoints.saturating_sub(1).max(1) as f32;
             store.vertex_t.iter().map(|&t| cmap.sample(t / last)).collect()
         }
-        ColourBy::Width => {
-            let Some((lo, hi)) = width_range(store) else {
-                return vec![MISSING; store.arcs.points.len()];
-            };
-            per_edge(&|e| match store.width[e] {
-                Some((w, _)) => cmap.sample((w - lo) / (hi - lo).max(1e-6)),
-                None => MISSING,
-            })
-        }
+        // Width changes over time: coloured per edge and frame by `edge_styles` instead.
+        ColourBy::Width => vec![MISSING; store.arcs.points.len()],
         ColourBy::Hyperedge => per_edge(&|e| match store.hyperedge[e] {
             h if h >= 0 => id_colour(h),
             _ => MISSING,

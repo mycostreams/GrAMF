@@ -1,80 +1,32 @@
-
 use wgpu::{VertexAttribute, VertexBufferLayout, VertexStepMode, vertex_attr_array};
 
+/// One straight piece of an arc, drawn as a screen-space quad (4 vertices, triangle strip)
+/// by `segments.wgsl`, so lines can be thicker than one pixel.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Vertex {
-    pub position: [f32; 4],
-    pub color: [f32; 4],
-    /// Timepoint index at which this vertex first appears.
-    pub t: f32,
+pub struct SegmentInstance {
+    /// End points in µm.
+    pub p0: [f32; 2],
+    pub p1: [f32; 2],
+    /// Timepoint index at which each end appears.
+    pub t: [f32; 2],
+    pub colour: [f32; 4],
+    /// Row in the per-edge style table (current width, and colour in width mode).
+    pub edge: u32,
+    /// 0: thickness from the line style; > 0: this many pixels; < 0: the styled thickness
+    /// plus this many pixels (a halo around the edge, for highlights). Non-zero also keeps
+    /// `colour` instead of the per-edge colour.
+    pub fixed_px: f32,
 }
 
-impl Vertex {
-    pub fn vertex_attributes() -> Vec<VertexAttribute> {
-        vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32].to_vec()
-    }
-
-    pub fn description(attributes: &[VertexAttribute]) -> VertexBufferLayout<'_> {
+impl SegmentInstance {
+    pub fn layout() -> VertexBufferLayout<'static> {
+        const ATTRIBUTES: [VertexAttribute; 6] =
+            vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Uint32, 5 => Float32];
         VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: VertexStepMode::Vertex,
-            attributes,
-        }
-    }
-}
-
-pub struct EdgeInstance {
-    pub start_position: cgmath::Vector3<f32>,
-    pub end_position: cgmath::Vector3<f32>,
-    pub color: cgmath::Vector4<f32>,
-    pub width: f32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct EdgeInstanceRaw {
-    pub start_position: [f32; 3],
-    pub end_position: [f32; 3],
-    pub color: [f32; 4],
-    _padding: [f32; 3], // Padding to ensure 16-byte alignment for the width field
-    pub width: f32,
-}
-
-impl EdgeInstance {
-    fn to_raw(&self) -> EdgeInstanceRaw {
-        EdgeInstanceRaw {
-            start_position: self.start_position.into(),
-            end_position: self.end_position.into(),
-            color: self.color.into(),
-            _padding: [0.0; 3],
-            width: self.width,
-        }
-    }
-}
-
-impl EdgeInstanceRaw {
-    pub fn vertex_attributes() -> Vec<VertexAttribute> {
-        vertex_attr_array![
-            3 => Float32x3, // start_position
-            4 => Float32x3, // end_position
-            5 => Float32x4, // color
-            6 => Float32,   // width
-        ]
-        .to_vec()
-    }
-
-    pub fn description(attributes: &[VertexAttribute]) -> VertexBufferLayout<'_> {
-        VertexBufferLayout {
-            array_stride: std::mem::size_of::<EdgeInstanceRaw>() as wgpu::BufferAddress,
+            array_stride: std::mem::size_of::<SegmentInstance>() as wgpu::BufferAddress,
             step_mode: VertexStepMode::Instance,
-            attributes,
+            attributes: &ATTRIBUTES,
         }
     }
 }
-
-// #[repr(C)]
-// #[derive(Default, Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-// pub struct UniformBuffer {
-//     pub mvp: nalgebra_glm::Mat4,
-// }

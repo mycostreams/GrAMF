@@ -2,11 +2,11 @@ use super::annotate::{self, AnnotationState, Choice};
 use super::dev_panel::{self, DevState};
 use super::export_dialog::{self, ExportDialog};
 use crate::annotations::{Op, Target};
-use crate::colour::{Cmap, ColourBy};
+use crate::colour::{Cmap, ColourBy, Scale};
 use crate::store::Store;
 use crate::time::{TimeAxis, TimeUnit};
 
-/// Room right of the slider for the time label, gated marker and unit picker (points).
+/// Room right of the slider for the time label, faulty-frame marker and unit picker (points).
 const TIME_LABEL_WIDTH: f32 = 420.0;
 
 /// Seconds per frame when playing.
@@ -75,12 +75,20 @@ pub enum Selection {
     Hyperedge(i64),
     /// Id of an edge added in an annotation file
     Added(i64),
+    /// The edges inside the last box drawn with the Box select tool
+    Box,
 }
 
 pub struct Layers {
     pub colour_by: ColourBy,
     /// Colormap for the continuous modes (t_first, width).
-    pub cmap: Cmap,
+    pub scale: Scale,
+    /// Line thickness in pixels, and whether it follows each edge's width at the current time.
+    pub line_px: f32,
+    pub line_by_width: bool,
+    /// Side panels shown (left: Layers, right: Inspector).
+    pub left_open: bool,
+    pub right_open: bool,
     pub node_ids: bool,
     pub hyperedge_ids: bool,
 }
@@ -89,7 +97,11 @@ impl Default for Layers {
     fn default() -> Self {
         Self {
             colour_by: ColourBy::Uniform,
-            cmap: Cmap::Viridis,
+            scale: Scale::default(),
+            line_px: 1.5,
+            line_by_width: false,
+            left_open: true,
+            right_open: true,
             node_ids: false,
             hyperedge_ids: false,
         }
@@ -115,6 +127,12 @@ pub struct FrameState<'a> {
     pub dev: &'a mut DevState,
     /// Tag of a newer release, if the startup check found one.
     pub update: Option<&'a str>,
+    /// Raw rows loaded for this edge, if any.
+    pub raw: Option<&'a (usize, Vec<crate::devtools::RawTable>)>,
+    /// Edges of the box selection.
+    pub boxed: &'a [usize],
+    /// The status line names a file that can be shown in the file manager.
+    pub reveal: bool,
 }
 
 /// What the user asked for this frame; acted on outside the egui closure.
@@ -131,12 +149,16 @@ pub struct UiActions {
     pub choice: Option<Choice>,
     pub export: bool,
     pub evidence_toggled: bool,
+    pub fit: bool,
+    /// The inspector's Raw rows section is open: keep the rows for the selected edge loaded.
+    pub raw_wanted: bool,
+    pub reveal: bool,
     /// Area left over between the panels, in points: where the map is drawn.
     pub map_rect: Option<egui::Rect>,
 }
 
 pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
-    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update } =
+    let FrameState { title, status, timeline, layers, store, selection, labels, mut annot, overlay, confirm, export, dev, update, raw, boxed, reveal } =
         frame;
     let mut actions = UiActions::default();
 
@@ -204,6 +226,10 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                 ui.label(egui::RichText::new(title).color(egui::Color32::LIGHT_GREEN));
 
                 ui.separator();
+                let file_manager = if cfg!(windows) { "Show in Explorer" } else { "Show in Finder" };
+                if reveal && ui.button(file_manager).clicked() {
+                    actions.reveal = true;
+                }
                 ui.label(status);
             });
 
@@ -234,8 +260,25 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             .show_inside(ui, |ui| actions.evidence_toggled = dev_panel::show(ui, dev));
     }
 
+    if !layers.left_open {
+        egui::Panel::left("layers_collapsed").resizable(false).exact_size(22.0).show_inside(ui, |ui| {
+            if ui.small_button("»").on_hover_text("show Layers").clicked() {
+                layers.left_open = true;
+            }
+        });
+    } else {
     egui::Panel::left("layers").show_inside(ui, |ui| {
-        ui.heading("Layers");
+        ui.horizontal(|ui| {
+            ui.heading("Layers");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("«").on_hover_text("hide Layers").clicked() {
+                    layers.left_open = false;
+                }
+                if ui.small_button("Fit").on_hover_text("show the whole plate (Home)").clicked() {
+                    actions.fit = true;
+                }
+            });
+        });
         let before = layers.colour_by;
         egui::ComboBox::from_label("colour")
             .selected_text(layers.colour_by.name())
@@ -244,11 +287,18 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                     ui.selectable_value(&mut layers.colour_by, by, by.name());
                 }
             });
-        let cmap_before = layers.cmap;
+        let scale_before = layers.scale;
         if let Some(store) = store {
             legend(ui, store, layers, timeline);
         }
-        actions.colour_changed = layers.colour_by != before || layers.cmap != cmap_before;
+        actions.colour_changed = layers.colour_by != before || layers.scale != scale_before;
+        ui.horizontal(|ui| {
+            ui.label("lines");
+            ui.selectable_value(&mut layers.line_by_width, false, "thin");
+            ui.selectable_value(&mut layers.line_by_width, true, "by width")
+                .on_hover_text("thickness follows each edge's width at the current timepoint");
+        });
+        ui.add(egui::Slider::new(&mut layers.line_px, 0.5..=6.0).text("px").step_by(0.25));
         ui.checkbox(&mut layers.node_ids, "Node ids");
         ui.checkbox(&mut layers.hyperedge_ids, "Hyperedge ids");
         if (layers.node_ids || layers.hyperedge_ids) && labels.is_none() {
@@ -264,13 +314,28 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         }
     });
 
+    }
+
+    if !layers.right_open {
+        egui::Panel::right("inspector_collapsed").resizable(false).exact_size(22.0).show_inside(ui, |ui| {
+            if ui.small_button("«").on_hover_text("show Inspector").clicked() {
+                layers.right_open = true;
+            }
+        });
+    } else {
     egui::Panel::right("right").show_inside(ui, |ui| {
-        ui.heading("Inspector");
+        ui.horizontal(|ui| {
+            if ui.small_button("»").on_hover_text("hide Inspector").clicked() {
+                layers.right_open = false;
+            }
+            ui.heading("Inspector");
+        });
         ui.separator();
         match (store, selection) {
             (Some(store), Some(sel)) => {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let (select, ops) = inspector(ui, store, sel, timeline, annot.as_deref_mut());
+                    let (select, ops) =
+                        inspector(ui, store, sel, timeline, annot.as_deref_mut(), raw, &mut actions.raw_wanted, boxed);
                     actions.select = select;
                     actions.ops.extend(ops);
                 });
@@ -280,6 +345,7 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             }
         }
     });
+    }
 
     let map = ui.available_rect_before_wrap();
     let painter = ui.painter_at(map);
@@ -307,6 +373,9 @@ fn inspector(
     sel: Selection,
     timeline: Option<&Timeline>,
     annot: Option<&mut AnnotationState>,
+    raw: Option<&(usize, Vec<crate::devtools::RawTable>)>,
+    raw_wanted: &mut bool,
+    boxed: &[usize],
 ) -> (Option<Selection>, Vec<Op>) {
     let mut select = None;
     let mut ops = vec![];
@@ -336,7 +405,13 @@ fn inspector(
                 }
                 row(ui, "length", format!("{:.1} µm", store.edge_length_um[e]));
                 appears(ui, store.edge_t[e]);
-                row(ui, "width", match store.width[e] {
+                if let (false, Some(tl)) = (store.width_t.is_empty(), timeline) {
+                    row(ui, "width now", match store.width_at(e, Some(tl.index)) {
+                        Some(w) => format!("{w:.2} µm (frame {})", tl.index),
+                        None => "not measured yet".into(),
+                    });
+                }
+                row(ui, "width (pooled)", match store.width[e] {
                     Some((w, se)) => format!("{w:.2} ± {se:.2} µm"),
                     None => "not measured".into(),
                 });
@@ -350,6 +425,14 @@ fn inspector(
             if let Some(st) = annot {
                 ops = annotate::inspector_section(ui, st, store, Target::Edge(e));
             }
+            ui.separator();
+            let section = egui::CollapsingHeader::new("Raw rows").id_salt("raw_rows").show(ui, |ui| match raw {
+                Some((re, tables)) if *re == e => raw_tables(ui, tables),
+                _ => {
+                    ui.label(egui::RichText::new("loading…").weak());
+                }
+            });
+            *raw_wanted = section.body_returned.is_some();
         }
         Selection::Node(n) => {
             let edges = store.incident_edges(n);
@@ -371,6 +454,15 @@ fn inspector(
             if let Some(st) = annot {
                 ops = annotate::inspector_section(ui, st, store, Target::Node(store.node_ids[n]));
             }
+        }
+        Selection::Box => {
+            let length: f32 = boxed.iter().map(|&e| store.edge_length_um[e]).sum();
+            ui.strong("Box selection");
+            egui::Grid::new("box").num_columns(2).show(ui, |ui| {
+                row(ui, "edges", boxed.len().to_string());
+                row(ui, "length", format!("{length:.1} µm"));
+            });
+            ui.label(egui::RichText::new("File > Export tables… can export just these edges").weak().small());
         }
         Selection::Added(id) => {
             ui.strong(format!("Added edge {id}"));
@@ -410,14 +502,14 @@ fn inspector(
 
 fn timeline_bar(ui: &mut egui::Ui, timeline: &mut Timeline) {
     ui.horizontal(|ui| {
-        if ui.button("◀").on_hover_text("Previous frame (←)").clicked() {
+        if ui.button("◀").on_hover_text("Previous frame (Left arrow)").clicked() {
             timeline.step(-1);
         }
         let play = if timeline.playing { "⏸" } else { "⏵" };
         if ui.button(play).on_hover_text("Play (Space)").clicked() {
             timeline.toggle_play();
         }
-        if ui.button("▶").on_hover_text("Next frame (→)").clicked() {
+        if ui.button("▶").on_hover_text("Next frame (Right arrow)").clicked() {
             timeline.step(1);
         }
 
@@ -426,13 +518,13 @@ fn timeline_bar(ui: &mut egui::Ui, timeline: &mut Timeline) {
         let gated = timeline.axis.is_gated(timeline.index);
 
         // The slider comes first at a fixed width: widgets laid out before it would shift its
-        // auto-generated id when they appear (the gated marker), which drops an active drag.
+        // auto-generated id when they appear (the faulty-frame marker), which drops an active drag.
         ui.spacing_mut().slider_width = (ui.available_width() - TIME_LABEL_WIDTH).max(80.0);
         ui.add(egui::Slider::new(&mut timeline.index, 0..=last).show_value(false));
         ui.label(label);
         if gated {
-            ui.label(egui::RichText::new("gated").color(egui::Color32::LIGHT_RED))
-                .on_hover_text("quality weight 0: excluded from dating");
+            ui.label(egui::RichText::new("faulty frame").color(egui::Color32::LIGHT_RED))
+                .on_hover_text("quality weight 0: the pipeline judged this frame faulty and excluded it from dating");
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             egui::ComboBox::from_id_salt("time_unit")
@@ -465,18 +557,27 @@ fn legend(ui: &mut egui::Ui, store: &Store, layers: &mut Layers, timeline: Optio
         },
         _ => return,
     };
-    let size = egui::vec2(ui.available_width().min(160.0), 10.0);
-    let bar = colour_bar(ui, layers.cmap, size, egui::Sense::click())
-        .on_hover_text(format!("{} — click to change the colormap", layers.cmap.name()))
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let bar = ui
+        .horizontal(|ui| {
+            let size = egui::vec2((ui.available_width() - 60.0).clamp(60.0, 160.0), 10.0);
+            let bar = colour_bar(ui, layers.scale, size, egui::Sense::click())
+                .on_hover_text(format!("{} — click to change the colormap", layers.scale.cmap.name()))
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if ui.selectable_label(layers.scale.reversed, "reverse").on_hover_text("reverse the colormap").clicked() {
+                layers.scale.reversed = !layers.scale.reversed;
+            }
+            bar
+        })
+        .inner;
     egui::Popup::menu(&bar).show(|ui| {
         for cmap in Cmap::ALL {
             let row = ui.horizontal(|ui| {
-                colour_bar(ui, cmap, egui::vec2(90.0, 10.0), egui::Sense::hover());
-                ui.selectable_label(layers.cmap == cmap, cmap.name())
+                let preview = Scale { cmap, reversed: layers.scale.reversed };
+                colour_bar(ui, preview, egui::vec2(90.0, 10.0), egui::Sense::hover());
+                ui.selectable_label(layers.scale.cmap == cmap, cmap.name())
             });
             if row.inner.clicked() || row.response.interact(egui::Sense::click()).clicked() {
-                layers.cmap = cmap;
+                layers.scale.cmap = cmap;
                 ui.close();
             }
         }
@@ -487,8 +588,8 @@ fn legend(ui: &mut egui::Ui, store: &Store, layers: &mut Layers, timeline: Optio
     });
 }
 
-/// Paints `cmap` left to right into a new `size` rect.
-fn colour_bar(ui: &mut egui::Ui, cmap: Cmap, size: egui::Vec2, sense: egui::Sense) -> egui::Response {
+/// Paints the scale left to right into a new `size` rect.
+fn colour_bar(ui: &mut egui::Ui, cmap: Scale, size: egui::Vec2, sense: egui::Sense) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, sense);
     const STEPS: usize = 32;
     for i in 0..STEPS {
@@ -502,4 +603,24 @@ fn colour_bar(ui: &mut egui::Ui, cmap: Cmap, size: egui::Vec2, sense: egui::Sens
         );
     }
     response
+}
+
+/// One small table per dataset: column names, then the rows about the selected edge.
+fn raw_tables(ui: &mut egui::Ui, tables: &[crate::devtools::RawTable]) {
+    for t in tables.iter().filter(|t| !t.rows.is_empty()) {
+        ui.label(egui::RichText::new(format!("{}  ({} rows)", t.dataset, t.rows.len())).strong().small());
+        egui::Grid::new(&t.dataset).striped(true).show(ui, |ui| {
+            for c in &t.columns {
+                ui.label(egui::RichText::new(c).weak().small());
+            }
+            ui.end_row();
+            for row in &t.rows {
+                for v in row {
+                    ui.monospace(v);
+                }
+                ui.end_row();
+            }
+        });
+        ui.add_space(4.0);
+    }
 }

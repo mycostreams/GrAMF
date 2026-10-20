@@ -55,17 +55,31 @@ pub struct Store {
     pub fingerprint: String,
     /// `/root_nodes` written by the old registrator, offered for import into annotations.
     pub root_nodes: Vec<i64>,
+    /// Width per (timepoint, edge) from `/edge_width_timesteps`, flat `[t * n_edges + e]`:
+    /// the segmenter estimate when valid, else the legacy one (the pipeline's own preference),
+    /// carried forward from the last measured frame; NaN before the first. Empty when the
+    /// store has no per-timestep widths.
+    pub width_t: Vec<f32>,
+    /// 5th, 50th and 95th percentile of the measured per-timestep widths.
+    pub width_t_quantiles: Option<[f32; 3]>,
 }
 
 /// The `/edge_width_segments` columns GrAMF uses (HDF5 converts compound members by name).
 #[derive(hdf5_metno::H5Type, Clone, Copy)]
 #[repr(C)]
-struct WidthSegment {
-    edge_id: i64,
-    s_start_um: f64,
-    s_end_um: f64,
-    width_um: f64,
-    width_se_um: f64,
+pub struct WidthSegment {
+    pub edge_id: i64,
+    pub s_start_um: f64,
+    pub s_end_um: f64,
+    pub width_um: f64,
+    pub width_se_um: f64,
+}
+
+pub fn read_width_segments(path: &Path) -> Result<Vec<WidthSegment>, String> {
+    let file = hdf5_metno::File::open(path).map_err(|e| e.to_string())?;
+    file.dataset("edge_width_segments")
+        .and_then(|d| d.read_raw::<WidthSegment>())
+        .map_err(|e| format!("/edge_width_segments: {e}"))
 }
 
 /// One `/edge_width_timesteps` row (schema v2): both width estimators per (edge, frame).
@@ -209,6 +223,11 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         .map(|s| s.to_string())
         .unwrap_or_default();
     let root_nodes = read_i64("root_nodes").unwrap_or_default();
+    let (width_t, width_t_quantiles) = file
+        .dataset("edge_width_timesteps")
+        .and_then(|d| d.read_raw::<WidthTimestep>())
+        .map(|rows| width_table(&rows, timepoints.len(), n_edges))
+        .unwrap_or_default();
 
     Ok(Store {
         arcs,
@@ -227,7 +246,39 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         hyperedge_anchors,
         fingerprint,
         root_nodes,
+        width_t,
+        width_t_quantiles,
     })
+}
+
+/// Builds [`Store::width_t`] and its quantiles; see there.
+fn width_table(rows: &[WidthTimestep], n_frames: usize, n_edges: usize) -> (Vec<f32>, Option<[f32; 3]>) {
+    if n_frames == 0 {
+        return (vec![], None);
+    }
+    let valid = |w: f64| (w.is_finite() && w > 0.0).then_some(w as f32);
+    let mut table = vec![f32::NAN; n_frames * n_edges];
+    let mut measured = vec![];
+    for r in rows {
+        let (Ok(t), Ok(e)) = (usize::try_from(r.timepoint_index), usize::try_from(r.edge_id)) else {
+            continue;
+        };
+        if let (true, Some(w)) = (t < n_frames && e < n_edges, valid(r.width_seg_um).or(valid(r.width_um))) {
+            table[t * n_edges + e] = w;
+            measured.push(w);
+        }
+    }
+    for t in 1..n_frames {
+        for e in 0..n_edges {
+            if table[t * n_edges + e].is_nan() {
+                table[t * n_edges + e] = table[(t - 1) * n_edges + e];
+            }
+        }
+    }
+    measured.sort_by(f32::total_cmp);
+    let q = |p: f32| measured[((measured.len() - 1) as f32 * p).round() as usize];
+    let quantiles = (!measured.is_empty()).then(|| [q(0.05), q(0.5), q(0.95)]);
+    (table, quantiles)
 }
 
 fn polyline_lengths(arcs: &Arcs) -> Vec<f32> {
@@ -264,6 +315,17 @@ fn mean_widths(n_edges: usize, segments: &[WidthSegment]) -> Result<Vec<Option<(
 impl Store {
     pub fn n_edges(&self) -> usize {
         self.arcs.n_edges()
+    }
+
+    /// Width of edge `e` at timepoint `t` (per-timestep table), else its pooled width.
+    pub fn width_at(&self, e: usize, t: Option<usize>) -> Option<f32> {
+        match t.filter(|_| !self.width_t.is_empty()) {
+            Some(t) => {
+                let t = t.min(self.timepoints.len() - 1);
+                Some(self.width_t[t * self.n_edges() + e]).filter(|w| w.is_finite())
+            }
+            None => self.width[e].map(|w| w.0),
+        }
     }
 
     /// Edges incident to node row `node`.
@@ -400,7 +462,18 @@ fn arcs_from_raw(offsets: &[i64], flat_points: &[f64]) -> Result<Arcs, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WidthSegment, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs};
+    use super::{WidthSegment, WidthTimestep, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs, width_table};
+
+    #[test]
+    fn width_table_prefers_seg_and_carries_forward() {
+        let row = |edge_id, timepoint_index, width_um, width_seg_um| WidthTimestep { edge_id, timepoint_index, width_um, width_seg_um };
+        let rows = [row(0, 1, 5.0, 7.0), row(0, 3, 6.0, f64::NAN), row(1, 0, 0.0, f64::NAN)];
+        let (t, q) = width_table(&rows, 4, 2);
+        // edge 0: NaN, 7 (seg), 7 (carried), 6 (legacy); edge 1: never valid
+        assert!(t[0].is_nan() && t[2] == 7.0 && t[4] == 7.0 && t[6] == 6.0);
+        assert!(t[1].is_nan() && t[7].is_nan());
+        assert_eq!(q, Some([6.0, 7.0, 7.0]));
+    }
 
     #[test]
     fn widths_and_segment_distance() {

@@ -5,6 +5,7 @@ use crate::renderer::gpu::Gpu;
 use egui_wgpu::{Renderer as EguiRenderer, ScreenDescriptor, wgpu};
 use web_time::Duration;
 use graph_renderer::GraphRenderer;
+pub use graph_renderer::LineStyle;
 
 /// The `AppRenderer` struct is responsible for managing the GPU, depth texture, egui renderer, and 3D scene. It handles rendering frames, resizing, and updating the scene based on time and aspect ratio.
 pub struct AppRenderer {
@@ -20,6 +21,7 @@ pub struct AppRenderer {
     fit_pending: bool,
     /// Current timepoint index; geometry appearing later is hidden.
     pub time: f32,
+    pub line: LineStyle,
 }
 
 impl AppRenderer {
@@ -55,6 +57,7 @@ impl AppRenderer {
             map_rect: [0.0, 0.0, width as f32, height as f32],
             fit_pending: false,
             time: f32::MAX,
+            line: LineStyle::default(),
         }
     }
 
@@ -73,6 +76,11 @@ impl AppRenderer {
     pub fn set_selection(&mut self, store: &crate::store::Store, edges: &[usize]) {
         self.graph_renderer
             .set_selection(&self.gpu.device, &store.arcs, &store.vertex_t, edges);
+    }
+
+    /// Per-edge `[r, g, b, width_um]` at the current timepoint.
+    pub fn set_edge_styles(&self, styles: &[[f32; 4]]) {
+        self.graph_renderer.set_edge_styles(&self.gpu.queue, styles);
     }
 
     pub fn set_evidence(&mut self, store: &crate::store::Store, spans: &[(usize, f32, f32, [f32; 4])]) {
@@ -155,8 +163,8 @@ impl AppRenderer {
         if std::mem::take(&mut self.fit_pending) {
             self.fit();
         }
-        self.graph_renderer
-            .update(&self.gpu.queue, self.map_aspect(), self.time);
+        let [_, _, w, h] = self.map_rect;
+        self.graph_renderer.update(&self.gpu.queue, [w, h], self.time, self.line);
 
         for (id, image_delta) in &textures_delta.set {
             self.egui_renderer

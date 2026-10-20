@@ -159,13 +159,39 @@ pub fn health(path: &Path, store: &Store, datasets: &[DatasetInfo], annotations:
     out
 }
 
-/// Every row about edge `e`: row `e` of each per-edge dataset, and the rows of edge-keyed
-/// tables whose first column is `e`. Returns `(dataset, rows)` pairs, rows as text.
-pub fn raw_rows(path: &Path, datasets: &[DatasetInfo], n_edges: usize, e: usize) -> Vec<(String, Vec<String>)> {
+/// Rows of one dataset about one edge, with column names where GrAMF knows them.
+pub struct RawTable {
+    pub dataset: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+/// Column names of the store's plain numeric datasets. Edge-keyed tables drop their leading
+/// `edge_id` column in [`raw_rows`] (it is the selected edge), so it is not listed here.
+fn column_names(dataset: &str, cols: usize) -> Vec<String> {
+    let known: &[&str] = match dataset {
+        "edges" | "edges_initial_edge" => &["node1", "node2"],
+        "points" => &["x_um", "y_um"],
+        "edge_time_runs" => &["frame_index", "score"],
+        "arc_time_runs" => &["s_start_um", "t_index"],
+        "arc_frame_matches" => &["frame_index", "s_start_um", "s_end_um"],
+        _ if cols == 1 => return vec![dataset.to_string()],
+        _ => &[],
+    };
+    if known.len() == cols {
+        known.iter().map(|c| c.to_string()).collect()
+    } else {
+        (0..cols).map(|i| format!("col {i}")).collect()
+    }
+}
+
+/// Every row about edge `e`: row `e` of each per-edge dataset, the rows of edge-keyed
+/// tables whose first column is `e`, and its width rows.
+pub fn raw_rows(path: &Path, datasets: &[DatasetInfo], n_edges: usize, e: usize) -> Vec<RawTable> {
     let Ok(file) = hdf5_metno::File::open(path) else {
         return vec![];
     };
-    let fmt = |v: &[f64]| v.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ");
+    let num = |x: f64| format!("{x}");
     let mut out = vec![];
     for d in datasets.iter().filter(|d| d.path != "/") {
         let name = d.path.trim_start_matches('/');
@@ -178,22 +204,37 @@ pub fn raw_rows(path: &Path, datasets: &[DatasetInfo], n_edges: usize, e: usize)
             continue;
         };
         let rows: Vec<&[f64]> = values.chunks_exact(cols).collect();
-        let picked: Vec<String> = if rows.len() == n_edges && name != "arcs_offsets" {
-            vec![fmt(rows[e])]
+        let (columns, picked): (Vec<String>, Vec<Vec<String>>) = if rows.len() == n_edges && name != "arcs_offsets" {
+            (column_names(name, cols), vec![rows[e].iter().copied().map(num).collect()])
         } else if cols >= 2 && ["edge_time_runs", "arc_time_runs", "arc_frame_matches"].contains(&name) {
-            rows.iter().filter(|r| r[0] as usize == e).map(|r| fmt(r)).collect()
+            let picked = rows.iter().filter(|r| r[0] as usize == e).map(|r| r[1..].iter().copied().map(num).collect()).collect();
+            (column_names(name, cols - 1), picked)
         } else {
             continue;
         };
-        out.push((d.path.clone(), picked));
+        out.push(RawTable { dataset: d.path.clone(), columns, rows: picked });
+    }
+    if let Ok(rows) = crate::store::read_width_segments(path) {
+        out.push(RawTable {
+            dataset: "/edge_width_segments".into(),
+            columns: ["s_start_um", "s_end_um", "width_um", "width_se_um"].map(String::from).to_vec(),
+            rows: rows
+                .iter()
+                .filter(|r| r.edge_id as usize == e)
+                .map(|r| vec![num(r.s_start_um), num(r.s_end_um), num(r.width_um), num(r.width_se_um)])
+                .collect(),
+        });
     }
     if let Ok(rows) = crate::store::read_width_timesteps(path) {
-        let picked = rows
-            .iter()
-            .filter(|r| r.edge_id as usize == e)
-            .map(|r| format!("t={} width_um={} width_seg_um={}", r.timepoint_index, r.width_um, r.width_seg_um))
-            .collect();
-        out.push(("/edge_width_timesteps".into(), picked));
+        out.push(RawTable {
+            dataset: "/edge_width_timesteps".into(),
+            columns: ["timepoint_index", "width_um", "width_seg_um"].map(String::from).to_vec(),
+            rows: rows
+                .iter()
+                .filter(|r| r.edge_id as usize == e)
+                .map(|r| vec![r.timepoint_index.to_string(), num(r.width_um), num(r.width_seg_um)])
+                .collect(),
+        });
     }
     out
 }
@@ -237,7 +278,14 @@ pub fn read_evidence(path: &Path, n_frames: usize, n_edges: usize) -> Result<Evi
 
 #[cfg(test)]
 mod tests {
-    use super::{check, Level};
+    use super::{check, column_names, Level};
+
+    #[test]
+    fn columns() {
+        assert_eq!(column_names("edges", 2), ["node1", "node2"]);
+        assert_eq!(column_names("t_first", 1), ["t_first"]);
+        assert_eq!(column_names("mystery", 3), ["col 0", "col 1", "col 2"]);
+    }
 
     #[test]
     fn check_levels() {
