@@ -119,6 +119,8 @@ pub struct Registration {
     pub video_edge: Option<[i64; 3]>,
     /// Matched runs by run path, with the inputs they were matched with.
     matches: HashMap<String, (String, Rc<RunMatch>)>,
+    /// Stage scatter zoom and pan (points), for the session it was set in.
+    scatter_view: (usize, f32, egui::Vec2),
 }
 
 impl Registration {
@@ -146,6 +148,7 @@ impl Registration {
             scores: HashMap::new(),
             video_edge: None,
             matches: HashMap::new(),
+            scatter_view: (0, 1.0, egui::Vec2::ZERO),
         }
     }
 
@@ -510,13 +513,31 @@ fn flow_layer_note(ui: &mut egui::Ui, store: &Store) {
     }
 }
 
-/// Positions of the selected session, oriented like the map; click selects.
+/// Positions of the selected session, oriented like the map; click selects, scroll zooms,
+/// drag pans, double-click resets. Run numbers show where a dot has room for them.
 fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>]) {
     let Some(session) = reg.sessions.get(reg.session) else {
         return;
     };
     let size = egui::vec2(ui.available_width(), 170.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    if reg.scatter_view.0 != reg.session || response.double_clicked() {
+        reg.scatter_view = (reg.session, 1.0, egui::Vec2::ZERO);
+    }
+    let (_, zoom, pan) = &mut reg.scatter_view;
+    *pan += response.drag_delta();
+    if let Some(cursor) = response.hover_pos() {
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            let factor = (scroll * 0.005).exp().clamp(0.5, 2.0);
+            let new_zoom = (*zoom * factor).clamp(1.0, 200.0);
+            // keep the point under the cursor in place
+            let from_centre = cursor - rect.center() - *pan;
+            *pan += from_centre - from_centre * (new_zoom / *zoom);
+            *zoom = new_zoom;
+        }
+    }
+    let (zoom, pan) = (reg.scatter_view.1 as f64, reg.scatter_view.2);
     let painter = ui.painter_at(rect);
     painter.rect_stroke(rect, 4.0, Stroke::new(0.5, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
 
@@ -539,18 +560,22 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
     // equal scale on both axes, centred, with a margin
     let inner = rect.shrink(14.0);
     let span = (max[0] - min[0]).max(max[1] - min[1]).max(1e-3);
-    let scale = (inner.width().min(inner.height()) as f64) / span;
+    let scale = (inner.width().min(inner.height()) as f64) / span * zoom;
     let mid = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
     let to_screen = |s: [f64; 2]| {
         Pos2::new(
-            inner.center().x + ((s[0] - mid[0]) * scale) as f32,
-            inner.center().y + ((s[1] - mid[1]) * scale) as f32,
+            inner.center().x + pan.x + ((s[0] - mid[0]) * scale) as f32,
+            inner.center().y + pan.y + ((s[1] - mid[1]) * scale) as f32,
         )
     };
 
+    let screen: Vec<Pos2> = session.positions.iter().map(|&p| to_screen(stage(p))).collect();
     let mut hovered = None;
-    for &p in &session.positions {
-        let at = to_screen(stage(p));
+    for (i, &p) in session.positions.iter().enumerate() {
+        let at = screen[i];
+        if !rect.expand(8.0).contains(at) {
+            continue;
+        }
         let colour = if reg.anchors.contains_key(&p) {
             ANCHORED
         } else if fits.get(reg.session).is_some_and(|f| f.is_some()) {
@@ -568,6 +593,13 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
         if response.hover_pos().is_some_and(|h| h.distance(at) < 9.0) {
             hovered = Some(p);
         }
+        // run numbers, once the nearest other dot is far enough away to fit them
+        let room = screen.iter().enumerate().filter(|&(j, _)| j != i).map(|(_, q)| q.distance(at)).fold(f32::MAX, f32::min);
+        if room > 34.0 {
+            if let Some(label) = run_numbers(&reg.videos.positions[p].runs) {
+                painter.text(at + egui::vec2(0.0, 8.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(10.0), ui.visuals().text_color());
+            }
+        }
     }
     if let Some(p) = hovered {
         let pos = &reg.videos.positions[p];
@@ -577,6 +609,17 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
             reg.run = 0;
         }
     }
+}
+
+/// "24-25" for consecutive run numbers, else "3, 7"; `None` when no run has one.
+fn run_numbers(runs: &[crate::videos::Run]) -> Option<String> {
+    let nrs: Vec<i64> = runs.iter().filter_map(|r| r.run_nr).collect();
+    let (&first, &last) = (nrs.first()?, nrs.last()?);
+    Some(if nrs.len() > 1 && nrs.windows(2).all(|w| w[1] == w[0] + 1) {
+        format!("{first}-{last}")
+    } else {
+        nrs.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ")
+    })
 }
 
 /// Right panel: the selected position and its runs.
@@ -1141,4 +1184,25 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
     }
     let runs = out.runs.len();
     (out, sessions, runs)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn run_number_labels() {
+        let run = |nr| crate::videos::Run {
+            rel_path: String::new(),
+            utc: 0,
+            mode: String::new(),
+            run_nr: nr,
+            delta_x_um: 1.0,
+            frame_size: [1, 1],
+            camera: String::new(),
+            stage_mm: None,
+        };
+        assert_eq!(super::run_numbers(&[run(Some(24)), run(Some(25))]).as_deref(), Some("24-25"));
+        assert_eq!(super::run_numbers(&[run(Some(3)), run(None), run(Some(7))]).as_deref(), Some("3, 7"));
+        assert_eq!(super::run_numbers(&[run(Some(9))]).as_deref(), Some("9"));
+        assert_eq!(super::run_numbers(&[run(None)]), None);
+    }
 }
