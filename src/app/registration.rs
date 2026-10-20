@@ -355,7 +355,7 @@ fn flow_layer_note(ui: &mut egui::Ui, store: &Store) {
     }
 }
 
-/// Stage positions of the selected session in stage mm (x right, y down); click selects.
+/// Positions of the selected session, oriented like the map; click selects.
 fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>]) {
     let Some(session) = reg.sessions.get(reg.session) else {
         return;
@@ -365,7 +365,13 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
     let painter = ui.painter_at(rect);
     painter.rect_stroke(rect, 4.0, Stroke::new(0.5, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
 
-    let stage = |p: usize| reg.videos.positions[p].stage_mm;
+    // Drawn the way the map shows them: placed positions where the session's placement puts
+    // them (STG axes, rows down); unplaced sessions in stage axes with y up.
+    let fit = fits.get(reg.session).and_then(|f| f.as_ref()).map(|f| f.sim);
+    let stage = |p: usize| {
+        let s = reg.videos.positions[p].stage_mm;
+        fit.map_or([s[0], -s[1]], |sim| sim.apply(s))
+    };
     let (mut min, mut max) = ([f64::MAX; 2], [f64::MIN; 2]);
     for &p in &session.positions {
         for k in 0..2 {
