@@ -521,11 +521,13 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
     painter.rect_stroke(rect, 4.0, Stroke::new(0.5, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
 
     // Drawn the way the map shows them: placed positions where the session's placement puts
-    // them (STG axes, rows down); unplaced sessions in stage axes with y up.
+    // them (STG axes, rows down); unplaced sessions in the orientation a fit would start from
+    // (the setup default's mirror and rotation, else none).
     let fit = fits.get(reg.session).and_then(|f| f.as_ref()).map(|f| f.sim);
+    let base = reg.default.unwrap_or_default();
     let stage = |p: usize| {
         let s = reg.videos.positions[p].stage_mm;
-        fit.map_or([s[0], -s[1]], |sim| sim.apply(s))
+        fit.map_or(base.orient(s), |sim| sim.apply(s))
     };
     let (mut min, mut max) = ([f64::MAX; 2], [f64::MIN; 2]);
     for &p in &session.positions {
