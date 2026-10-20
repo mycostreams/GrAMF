@@ -2,6 +2,7 @@
 //! Annotations never touch the store: they are keyed on its `edge_id` / node ids, and
 //! record the `backbone_fingerprint` they were made against.
 
+use crate::matching::EdgeRef;
 use hdf5_metno::types::VarLenUnicode;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -26,6 +27,74 @@ pub struct AddedEdge {
     pub v: i64,
 }
 
+/// A video edge of one run: (run path relative to `polyflow_analysis`, video `(u, v, k)`).
+pub type RunEdge = (String, [i64; 3]);
+
+/// The author's video registration (DESIGN.md §10): everything needed to reopen and redo it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RegistrationLayer {
+    /// Position name -> where its video centre sits on the STG (µm).
+    pub anchors: BTreeMap<String, [f64; 2]>,
+    /// Verified sessions, by their first position's name.
+    pub verified: BTreeSet<String>,
+    /// Run path -> extra shift (µm) applied before the snap.
+    pub nudges: BTreeMap<String, [f32; 2]>,
+    /// A video edge's STG chain set by hand (replaces the automatic one).
+    pub assignments: BTreeMap<RunEdge, Vec<(EdgeRef, i8)>>,
+    /// Video edges marked as artifacts: no flow from them.
+    pub disabled: BTreeSet<RunEdge>,
+    /// Camera orientation, threshold (µm) and snap switch; `None`: the app's defaults.
+    pub camera: Option<u8>,
+    pub threshold_um: Option<f32>,
+    pub snap: Option<bool>,
+}
+
+impl RegistrationLayer {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// The flow layer in STHype's `/flow_runs` / `/flow_measurements` compound schema
+/// (FLOW_SCHEMA_VERSION 1); `edge_id` may be an added edge's id.
+#[derive(Clone, Default)]
+pub struct FlowOutput {
+    pub runs: Vec<FlowRunRow>,
+    pub measurements: Vec<FlowMeasurementRow>,
+    pub cutoff_um: f32,
+    pub n_anchors: i64,
+    pub n_pins: i64,
+}
+
+#[derive(hdf5_metno::H5Type, Clone, Debug)]
+#[repr(C)]
+pub struct FlowRunRow {
+    pub run_path: VarLenUnicode,
+    pub mode: VarLenUnicode,
+    pub run_nr: i64,
+    pub video_epoch_s: f64,
+    pub frame_timestamp: f64,
+}
+
+#[derive(hdf5_metno::H5Type, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct FlowMeasurementRow {
+    pub edge_id: i64,
+    /// +1 along `/edges` (node1, node2), -1 against.
+    pub direction: i8,
+    pub run_index: i64,
+    pub src_u: i64,
+    pub src_v: i64,
+    pub src_k: i64,
+    pub median: f64,
+    pub perc_25: f64,
+    pub perc_75: f64,
+    pub flux_ratio: f64,
+    pub coverage: f64,
+    pub pixel_count: f64,
+    pub flux: f64,
+}
+
 /// One reversible change.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Op {
@@ -39,6 +108,14 @@ pub enum Op {
     SetNote(Target, Option<String>),
     /// A named trail's waypoints (node ids); `None` deletes the trail.
     SetTrail(String, Option<Vec<i64>>),
+    /// Registration (video positions and their runs):
+    SetAnchor(String, Option<[f64; 2]>),
+    SetVerified(String, bool),
+    SetNudge(String, Option<[f32; 2]>),
+    SetAssignment(RunEdge, Option<Vec<(EdgeRef, i8)>>),
+    SetDisabled(RunEdge, bool),
+    /// Camera orientation, threshold (µm), snap.
+    SetRegistrationParams(Option<u8>, Option<f32>, Option<bool>),
 }
 
 impl Op {
@@ -56,6 +133,12 @@ impl Op {
                 Some(w) => format!("set_trail name={name:?} waypoints={w:?}"),
                 None => format!("delete_trail name={name:?}"),
             },
+            Op::SetAnchor(p, a) => format!("set_anchor position={p:?} at={a:?}"),
+            Op::SetVerified(s, v) => format!("set_verified session={s:?} value={v}"),
+            Op::SetNudge(r, n) => format!("set_nudge run={r:?} shift={n:?}"),
+            Op::SetAssignment((r, k), c) => format!("set_assignment run={r:?} video_edge={k:?} chain={c:?}"),
+            Op::SetDisabled((r, k), v) => format!("set_disabled run={r:?} video_edge={k:?} value={v}"),
+            Op::SetRegistrationParams(c, t, s) => format!("set_registration camera={c:?} threshold_um={t:?} snap={s:?}"),
         }
     }
 }
@@ -89,6 +172,9 @@ pub struct Annotations {
     pub notes: BTreeMap<Target, String>,
     /// Trail name -> waypoints (node ids); the routed path is derived from the STG.
     pub trails: BTreeMap<String, Vec<i64>>,
+    pub registration: RegistrationLayer,
+    /// The flow layer: computed from the registration when it is saved, else as last loaded.
+    pub flow: Option<FlowOutput>,
     pub history: Vec<HistoryRow>,
     undo: Vec<Op>,
     redo: Vec<Op>,
@@ -146,6 +232,46 @@ impl Annotations {
                 };
                 Op::SetTrail(name, was)
             }
+            Op::SetAnchor(p, a) => {
+                let r = &mut self.registration.anchors;
+                let was = match a {
+                    Some(a) => r.insert(p.clone(), a),
+                    None => r.remove(&p),
+                };
+                Op::SetAnchor(p, was)
+            }
+            Op::SetVerified(s, v) => {
+                let was = self.registration.verified.contains(&s);
+                if v { self.registration.verified.insert(s.clone()) } else { self.registration.verified.remove(&s) };
+                Op::SetVerified(s, was)
+            }
+            Op::SetNudge(r, n) => {
+                let m = &mut self.registration.nudges;
+                let was = match n {
+                    Some(n) => m.insert(r.clone(), n),
+                    None => m.remove(&r),
+                };
+                Op::SetNudge(r, was)
+            }
+            Op::SetAssignment(k, c) => {
+                let m = &mut self.registration.assignments;
+                let was = match c {
+                    Some(c) => m.insert(k.clone(), c),
+                    None => m.remove(&k),
+                };
+                Op::SetAssignment(k, was)
+            }
+            Op::SetDisabled(k, v) => {
+                let was = self.registration.disabled.contains(&k);
+                if v { self.registration.disabled.insert(k.clone()) } else { self.registration.disabled.remove(&k) };
+                Op::SetDisabled(k, was)
+            }
+            Op::SetRegistrationParams(c, t, s) => {
+                let r = &mut self.registration;
+                let was = Op::SetRegistrationParams(r.camera, r.threshold_um, r.snap);
+                (r.camera, r.threshold_um, r.snap) = (c, t, s);
+                was
+            }
         }
     }
 
@@ -195,6 +321,7 @@ impl Annotations {
             && self.added.is_empty()
             && self.notes.is_empty()
             && self.trails.is_empty()
+            && self.registration.is_empty()
     }
 }
 
@@ -313,11 +440,123 @@ fn write_file(a: &Annotations, path: &Path, trail_paths: &BTreeMap<String, Vec<i
     ints(&g, "node_offsets", &no)?;
     ints(&g, "nodes", &nv)?;
 
+    write_registration(&f, &a.registration, &ints, &strs)?;
+    if let Some(flow) = &a.flow {
+        f.new_dataset_builder().with_data(&flow.runs[..]).create("flow_runs")?;
+        let m = f.new_dataset_builder().with_data(&flow.measurements[..]).create("flow_measurements")?;
+        let attr_i = |name: &str, v: i64| -> H5 { m.new_attr::<i64>().shape(()).create(name)?.as_writer().write_scalar(&v) };
+        attr_i("schema_version", 1)?;
+        attr_i("n_anchors", flow.n_anchors)?;
+        attr_i("n_pins", flow.n_pins)?;
+        m.new_attr::<f64>().shape(()).create("cutoff_um")?.as_writer().write_scalar(&(flow.cutoff_um as f64))?;
+        for (name, value) in [("backbone_fingerprint", a.fingerprint.as_str()), ("written_by", "GrAMF")] {
+            m.new_attr::<VarLenUnicode>().shape(()).create(name)?.as_writer().write_scalar(&vlu(value))?;
+        }
+    }
+
     let g = f.create_group("history")?;
     ints(&g, "utc", &a.history.iter().map(|h| h.utc).collect::<Vec<_>>())?;
     strs(&g, "author", &a.history.iter().map(|h| h.author.clone()).collect::<Vec<_>>())?;
     strs(&g, "op", &a.history.iter().map(|h| h.op.clone()).collect::<Vec<_>>())?;
     Ok(())
+}
+
+type Ints<'a> = dyn Fn(&hdf5_metno::Group, &str, &[i64]) -> H5 + 'a;
+type Strs<'a> = dyn Fn(&hdf5_metno::Group, &str, &[String]) -> H5 + 'a;
+
+fn write_registration(f: &hdf5_metno::File, r: &RegistrationLayer, ints: &Ints, strs: &Strs) -> H5 {
+    let g = f.create_group("registration")?;
+    let floats = |g: &hdf5_metno::Group, name: &str, v: &[f64]| -> H5 { g.new_dataset_builder().with_data(v).create(name).map(drop) };
+    let attr_f = |name: &str, v: f64| -> H5 { g.new_attr::<f64>().shape(()).create(name)?.as_writer().write_scalar(&v) };
+    attr_f("camera", r.camera.map_or(-1.0, f64::from))?;
+    attr_f("threshold_um", r.threshold_um.map_or(f64::NAN, f64::from))?;
+    attr_f("snap", r.snap.map_or(-1.0, |s| s as u8 as f64))?;
+
+    let a = g.create_group("anchors")?;
+    strs(&a, "position", &r.anchors.keys().cloned().collect::<Vec<_>>())?;
+    floats(&a, "x_um", &r.anchors.values().map(|p| p[0]).collect::<Vec<_>>())?;
+    floats(&a, "y_um", &r.anchors.values().map(|p| p[1]).collect::<Vec<_>>())?;
+
+    let v = g.create_group("verified")?;
+    strs(&v, "session", &r.verified.iter().cloned().collect::<Vec<_>>())?;
+
+    let n = g.create_group("nudges")?;
+    strs(&n, "run_path", &r.nudges.keys().cloned().collect::<Vec<_>>())?;
+    floats(&n, "dx_um", &r.nudges.values().map(|p| p[0] as f64).collect::<Vec<_>>())?;
+    floats(&n, "dy_um", &r.nudges.values().map(|p| p[1] as f64).collect::<Vec<_>>())?;
+
+    let run_edges = |g: &hdf5_metno::Group, keys: &mut dyn Iterator<Item = &RunEdge>| -> H5 {
+        let keys: Vec<&RunEdge> = keys.collect();
+        strs(g, "run_path", &keys.iter().map(|k| k.0.clone()).collect::<Vec<_>>())?;
+        for (i, name) in ["u", "v", "k"].iter().enumerate() {
+            ints(g, name, &keys.iter().map(|k| k.1[i]).collect::<Vec<_>>())?;
+        }
+        Ok(())
+    };
+    let s = g.create_group("assignments")?;
+    run_edges(&s, &mut r.assignments.keys())?;
+    let (mut offsets, mut edge, mut added, mut dir) = (vec![0i64], vec![], vec![], vec![]);
+    for chain in r.assignments.values() {
+        for (e, d) in chain {
+            let (id, is_added) = match e {
+                EdgeRef::Pipeline(e) => (*e as i64, 0),
+                EdgeRef::Added(id) => (*id, 1),
+            };
+            edge.push(id);
+            added.push(is_added);
+            dir.push(*d as i64);
+        }
+        offsets.push(edge.len() as i64);
+    }
+    ints(&s, "chain_offsets", &offsets)?;
+    ints(&s, "chain_edge", &edge)?;
+    ints(&s, "chain_added", &added)?;
+    ints(&s, "chain_direction", &dir)?;
+
+    let d = g.create_group("disabled")?;
+    run_edges(&d, &mut r.disabled.iter())
+}
+
+fn read_registration(g: &hdf5_metno::Group) -> hdf5_metno::Result<RegistrationLayer> {
+    let ints = |name: &str| g.dataset(name).and_then(|d| d.read_raw::<i64>());
+    let floats = |name: &str| g.dataset(name).and_then(|d| d.read_raw::<f64>());
+    let strs = |name: &str| -> hdf5_metno::Result<Vec<String>> {
+        Ok(g.dataset(name)?.read_raw::<VarLenUnicode>()?.iter().map(|s| s.to_string()).collect())
+    };
+    let attr = |name: &str| g.attr(name).and_then(|a| a.read_scalar::<f64>()).unwrap_or(f64::NAN);
+    let mut r = RegistrationLayer {
+        camera: Some(attr("camera")).filter(|c| *c >= 0.0).map(|c| c as u8),
+        threshold_um: Some(attr("threshold_um")).filter(|t| t.is_finite()).map(|t| t as f32),
+        snap: Some(attr("snap")).filter(|s| *s >= 0.0).map(|s| s != 0.0),
+        ..Default::default()
+    };
+    let (names, xs, ys) = (strs("anchors/position")?, floats("anchors/x_um")?, floats("anchors/y_um")?);
+    r.anchors = (0..names.len()).map(|i| (names[i].clone(), [xs[i], ys[i]])).collect();
+    r.verified = strs("verified/session")?.into_iter().collect();
+    let (runs, dx, dy) = (strs("nudges/run_path")?, floats("nudges/dx_um")?, floats("nudges/dy_um")?);
+    r.nudges = (0..runs.len()).map(|i| (runs[i].clone(), [dx[i] as f32, dy[i] as f32])).collect();
+    let run_edges = |p: &str| -> hdf5_metno::Result<Vec<RunEdge>> {
+        let (runs, u, v, k) = (strs(&format!("{p}/run_path"))?, ints(&format!("{p}/u"))?, ints(&format!("{p}/v"))?, ints(&format!("{p}/k"))?);
+        Ok((0..runs.len()).map(|i| (runs[i].clone(), [u[i], v[i], k[i]])).collect())
+    };
+    let keys = run_edges("assignments")?;
+    let (offsets, edge, added, dir) =
+        (ints("assignments/chain_offsets")?, ints("assignments/chain_edge")?, ints("assignments/chain_added")?, ints("assignments/chain_direction")?);
+    r.assignments = keys
+        .into_iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let chain = (offsets[i] as usize..offsets[i + 1] as usize)
+                .map(|j| {
+                    let e = if added[j] != 0 { EdgeRef::Added(edge[j]) } else { EdgeRef::Pipeline(edge[j] as usize) };
+                    (e, if dir[j] >= 0 { 1 } else { -1 })
+                })
+                .collect();
+            (key, chain)
+        })
+        .collect();
+    r.disabled = run_edges("disabled")?.into_iter().collect();
+    Ok(r)
 }
 
 pub fn load(path: &Path) -> Result<Annotations, String> {
@@ -362,6 +601,19 @@ fn read_file(path: &Path) -> hdf5_metno::Result<Annotations> {
             (target, text)
         })
         .collect();
+    if let Ok(g) = f.group("registration") {
+        a.registration = read_registration(&g)?;
+    }
+    if let (Ok(runs), Ok(m)) = (f.dataset("flow_runs"), f.dataset("flow_measurements")) {
+        let attr_i = |n: &str| m.attr(n).and_then(|x| x.read_scalar::<i64>()).unwrap_or(0);
+        a.flow = Some(FlowOutput {
+            runs: runs.read_raw::<FlowRunRow>()?,
+            measurements: m.read_raw::<FlowMeasurementRow>()?,
+            cutoff_um: m.attr("cutoff_um").and_then(|x| x.read_scalar::<f64>()).unwrap_or(f64::NAN) as f32,
+            n_anchors: attr_i("n_anchors"),
+            n_pins: attr_i("n_pins"),
+        });
+    }
     // Optional: files written before trails existed have no /trails.
     if let (Ok(names), Ok(offsets), Ok(points)) =
         (strs("trails/name"), ints("trails/waypoint_offsets"), ints("trails/waypoints"))
@@ -408,6 +660,24 @@ mod tests {
         a.edit(Op::AddEdge(AddedEdge { id: a.next_added_id(), u: 1, v: 2 }));
         a.edit(Op::SetNote(Target::Edge(812), Some("false bridge".into())));
         a.edit(Op::SetTrail("main".into(), Some(vec![1, 2, 9188])));
+        a.edit(Op::SetAnchor("x_n10_38_y_4_484".into(), Some([31256.0, 37779.5])));
+        a.edit(Op::SetVerified("x_n10_886_y_3_999".into(), true));
+        a.edit(Op::SetNudge("pos/20260609_150109".into(), Some([3.0, -2.5])));
+        let run_edge = ("pos/20260609_150109".to_string(), [1, 6, 0]);
+        a.edit(Op::SetAssignment(run_edge.clone(), Some(vec![(EdgeRef::Pipeline(23158), 1), (EdgeRef::Added(1_000_000), -1)])));
+        a.edit(Op::SetDisabled(("pos/20260609_150109".to_string(), [2, 1, 0]), true));
+        a.edit(Op::SetRegistrationParams(Some(3), Some(12.5), Some(false)));
+        let row = |s: &str| VarLenUnicode::from_str(s).unwrap();
+        a.flow = Some(FlowOutput {
+            runs: vec![FlowRunRow { run_path: row("pos/20260609_150109"), mode: row("brightfield"), run_nr: -1, video_epoch_s: 1.0, frame_timestamp: 2.0 }],
+            measurements: vec![FlowMeasurementRow {
+                edge_id: 23158, direction: -1, run_index: 0, src_u: 1, src_v: 6, src_k: 0,
+                median: 1.5, perc_25: 0.5, perc_75: 3.0, flux_ratio: 0.5, coverage: 0.4, pixel_count: 100.0, flux: 150.0,
+            }],
+            cutoff_um: 12.5,
+            n_anchors: 1,
+            n_pins: 1,
+        });
 
         let dir = std::env::temp_dir().join(format!("gramf-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -424,7 +694,10 @@ mod tests {
         assert_eq!(b.added, [AddedEdge { id: ADDED_EDGE_ID_START, u: 1, v: 2 }]);
         assert_eq!(b.notes, a.notes);
         assert_eq!(b.trails, a.trails);
-        assert_eq!(b.history.len(), 7);
+        assert_eq!(b.registration, a.registration);
+        let flow = b.flow.as_ref().unwrap();
+        assert_eq!((flow.runs.len(), flow.measurements[0].edge_id, flow.measurements[0].direction), (1, 23158, -1));
+        assert_eq!(b.history.len(), 13);
         assert!(!b.dirty);
     }
 

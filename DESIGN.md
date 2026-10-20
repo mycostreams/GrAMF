@@ -345,7 +345,11 @@ All in the author's `annotations.<author>.h5` (new optional groups; no schema bu
 | `/trails` | names, node path CSR, waypoint CSR |
 
 Anchors, nudges and corrections are saved, so a registration can be reopened and corrected
-(the registrator only stored their counts). On open, a store's existing `/flow_*`, trails and
+(the registrator only stored their counts). As built (R5): every registration change is an annotation edit
+(undo/redo, unsaved marker); the flow layer is recomputed on save from **verified sessions
+only**, so unchecked placements never reach downstream analysis (FLW2605A003: 210 runs,
+6,462 measurements in 1.6 s). STHype's `read_flow_mappings` reads the result unchanged
+when its tables are placed in a store. On open, a store's existing `/flow_*`, trails and
 `/root_nodes` are offered for import, like `/root_nodes` today.
 
 **Publish to store** (temporary bridge): an explicit, confirmed action that writes the active

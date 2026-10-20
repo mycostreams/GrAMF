@@ -193,7 +193,7 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         });
     }
     if let (true, Some(r)) = (registering && !ui.ctx().egui_wants_keyboard_input(), reg.as_deref_mut()) {
-        for (key, tool) in [(egui::Key::S, registration::RegTool::Select), (egui::Key::A, registration::RegTool::Anchor)] {
+        for (tool, key, _) in registration::RegTool::ALL {
             if ui.input(|i| !i.modifiers.command && i.key_pressed(key)) {
                 r.tool = tool;
             }
