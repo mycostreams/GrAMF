@@ -25,6 +25,18 @@ impl Rigid {
 pub const MAX_SNAP_SHIFT_UM: f32 = 50.0;
 pub const MAX_SNAP_ROTATION_DEG: f32 = 5.0;
 
+/// How far the snap searches and may move: wide from a computed placement, local after the
+/// user has nudged a run (so the snap refines the nudge instead of undoing it).
+#[derive(Clone, Copy)]
+pub struct SnapReach {
+    pub first_radius_um: f32,
+    pub final_radius_um: f32,
+    pub max_shift_um: f32,
+}
+
+pub const SNAP_WIDE: SnapReach = SnapReach { first_radius_um: 30.0, final_radius_um: 12.0, max_shift_um: MAX_SNAP_SHIFT_UM };
+pub const SNAP_LOCAL: SnapReach = SnapReach { first_radius_um: 10.0, final_radius_um: 6.0, max_shift_um: 15.0 };
+
 /// A matched STG edge: a pipeline `edge_id`, or an added edge's id from an annotation file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EdgeRef {
@@ -75,8 +87,8 @@ fn closest_on_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
 
 /// Small rigid fit (ICP: rotation about the centroid plus translation) of `points` onto the
 /// nearest STG arcs. Returns `None` when there is too little to fit on, or when the result
-/// moves more than [`MAX_SNAP_SHIFT_UM`] / [`MAX_SNAP_ROTATION_DEG`].
-pub fn snap(store: &Store, points: &[[f32; 2]]) -> Option<Rigid> {
+/// moves more than `reach.max_shift_um` / [`MAX_SNAP_ROTATION_DEG`].
+pub fn snap(store: &Store, points: &[[f32; 2]], reach: SnapReach) -> Option<Rigid> {
     if points.len() < 10 {
         return None;
     }
@@ -85,7 +97,7 @@ pub fn snap(store: &Store, points: &[[f32; 2]]) -> Option<Rigid> {
     let grid = store.grid();
     let mut total = Rigid { centre, ..Default::default() };
     for iteration in 0..20 {
-        let radius = if iteration < 5 { 30.0 } else { 12.0 };
+        let radius = if iteration < 5 { reach.first_radius_um } else { reach.final_radius_um };
         let moved: Vec<[f32; 2]> = points.iter().map(|&p| total.apply(p)).collect();
         let pairs: Vec<([f32; 2], [f32; 2])> = moved
             .iter()
@@ -115,7 +127,7 @@ pub fn snap(store: &Store, points: &[[f32; 2]]) -> Option<Rigid> {
             break;
         }
     }
-    let plausible = len(total.shift) <= MAX_SNAP_SHIFT_UM && total.theta.abs().to_degrees() <= MAX_SNAP_ROTATION_DEG;
+    let plausible = len(total.shift) <= reach.max_shift_um && total.theta.abs().to_degrees() <= MAX_SNAP_ROTATION_DEG;
     plausible.then_some(total)
 }
 
@@ -265,7 +277,7 @@ mod tests {
     fn snap_pulls_a_shifted_copy_back() {
         let s = store();
         let pts: Vec<[f32; 2]> = (0..190).map(|i| [5.0 + i as f32, 7.0]).collect();
-        let r = snap(&s, &pts).unwrap();
+        let r = snap(&s, &pts, SNAP_WIDE).unwrap();
         let p = r.apply([50.0, 7.0]);
         assert!(p[1].abs() < 0.5, "snapped y {}", p[1]);
     }

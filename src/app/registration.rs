@@ -223,7 +223,8 @@ impl Registration {
             .collect();
         let snap = if self.snap() {
             let samples: Vec<[f32; 2]> = raw.iter().flat_map(|e| e.iter().step_by(5).copied()).collect();
-            matching::snap(store, &samples)
+            let reach = if nudge == [0.0; 2] { matching::SNAP_WIDE } else { matching::SNAP_LOCAL };
+            matching::snap(store, &samples, reach)
         } else {
             None
         };
@@ -729,19 +730,36 @@ pub fn overlay(reg: &mut Registration, store: &Store, added: &[AddedSegment], to
         let faint = Color32::from_rgba_unmultiplied(150, 190, 230, 150);
         let Some(m) = reg.run_match(p, run, &sim, store, added) else { continue };
         let rigid = m.snap.unwrap_or_default();
-        let place = |q: [f32; 2]| to_pt(rigid.apply(placement::place(&sim, camera, stage, q)));
+        // same chain as the video edges: place, nudge, snap
+        let place = |q: [f32; 2]| {
+            let w = placement::place(&sim, camera, stage, q);
+            to_pt(rigid.apply([w[0] + m.nudge[0], w[1] + m.nudge[1]]))
+        };
         let (hw, hh) = (frame[1] as f32 * dx / 2.0, frame[0] as f32 * dx / 2.0);
         let corners: Vec<Pos2> = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh], [-hw, -hh]].into_iter().map(place).collect();
         let outline = if selected { Color32::from_rgb(80, 220, 240) } else { faint };
         shapes.extend(Shape::dashed_line(&corners, Stroke::new(1.0, outline), 4.0, 3.0));
         for (i, (pts, cover)) in m.placed.iter().zip(&m.covers).enumerate() {
             let line: Vec<Pos2> = pts.iter().map(|&q| to_pt(q)).collect();
+            let chosen = reg.video_edge == Some(cover.key);
+            if m.disabled[i] {
+                // an artifact: dashed red with a cross at its middle, and no chain (no flow)
+                let alpha = if selected { 255 } else { 120 };
+                let red = Color32::from_rgba_unmultiplied(235, 70, 70, alpha);
+                shapes.extend(Shape::dashed_line(&line, Stroke::new(if chosen { 3.5 } else { 2.5 }, red), 4.0, 4.0));
+                if selected {
+                    let mid = line[line.len() / 2];
+                    let r = 6.0;
+                    shapes.push(Shape::line_segment([mid + egui::vec2(-r, -r), mid + egui::vec2(r, r)], Stroke::new(2.5, red)));
+                    shapes.push(Shape::line_segment([mid + egui::vec2(-r, r), mid + egui::vec2(r, -r)], Stroke::new(2.5, red)));
+                }
+                continue;
+            }
             if !selected {
                 shapes.push(Shape::line(line, Stroke::new(1.5, faint)));
                 continue;
             }
             let colour = EDGE_COLOURS[i % EDGE_COLOURS.len()];
-            let chosen = reg.video_edge == Some(cover.key);
             for &(e, _) in &cover.chain {
                 let stg: Vec<Pos2> = match e {
                     EdgeRef::Pipeline(e) => store.arcs.points[store.arcs.offsets[e]..store.arcs.offsets[e + 1]].iter().map(|&q| to_pt(q)).collect(),
