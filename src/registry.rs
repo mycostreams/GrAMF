@@ -12,13 +12,6 @@ pub struct PlateRecord {
     pub source: PathBuf,
 }
 
-/// `GRAMF_REGISTRY`, else the default Dropbox location.
-pub fn default_dir() -> Option<PathBuf> {
-    std::env::var_os("GRAMF_REGISTRY")
-        .map(PathBuf::from)
-        .or_else(|| std::env::home_dir().map(|h| h.join("AMOLF-SHIMIZU Dropbox/AMF-PlateList")))
-}
-
 /// `AAA0000A000`: experiment code, year+month, batch letter, plate number.
 fn is_plate_id(s: &[u8]) -> bool {
     s.len() == 11

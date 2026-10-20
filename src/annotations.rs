@@ -37,6 +37,8 @@ pub enum Op {
     AddEdge(AddedEdge),
     RemoveAddedEdge(AddedEdge),
     SetNote(Target, Option<String>),
+    /// A named trail's waypoints (node ids); `None` deletes the trail.
+    SetTrail(String, Option<Vec<i64>>),
 }
 
 impl Op {
@@ -50,6 +52,10 @@ impl Op {
             Op::AddEdge(a) => format!("add_edge id={} u={} v={}", a.id, a.u, a.v),
             Op::RemoveAddedEdge(a) => format!("remove_added_edge id={}", a.id),
             Op::SetNote(t, n) => format!("set_note {} text={:?}", target_name(*t), n.as_deref().unwrap_or("")),
+            Op::SetTrail(name, w) => match w {
+                Some(w) => format!("set_trail name={name:?} waypoints={w:?}"),
+                None => format!("delete_trail name={name:?}"),
+            },
         }
     }
 }
@@ -81,6 +87,8 @@ pub struct Annotations {
     pub roots: BTreeSet<i64>,
     pub added: Vec<AddedEdge>,
     pub notes: BTreeMap<Target, String>,
+    /// Trail name -> waypoints (node ids); the routed path is derived from the STG.
+    pub trails: BTreeMap<String, Vec<i64>>,
     pub history: Vec<HistoryRow>,
     undo: Vec<Op>,
     redo: Vec<Op>,
@@ -131,6 +139,13 @@ impl Annotations {
                 Op::AddEdge(a)
             }
             Op::SetNote(t, n) => Op::SetNote(t, set(&mut self.notes, t, n)),
+            Op::SetTrail(name, w) => {
+                let was = match w {
+                    Some(w) => self.trails.insert(name.clone(), w),
+                    None => self.trails.remove(&name),
+                };
+                Op::SetTrail(name, was)
+            }
         }
     }
 
@@ -179,6 +194,7 @@ impl Annotations {
             && self.roots.is_empty()
             && self.added.is_empty()
             && self.notes.is_empty()
+            && self.trails.is_empty()
     }
 }
 
@@ -220,14 +236,15 @@ fn vlu(s: &str) -> VarLenUnicode {
 }
 
 /// Writes `a` to `path` atomically: a `.tmp` sibling, then a rename over the target, so a
-/// crash or a Dropbox sync never sees a half-written HDF5 file.
-pub fn save(a: &Annotations, path: &Path) -> Result<(), String> {
+/// crash or a Dropbox sync never sees a half-written HDF5 file. `trail_paths` holds each
+/// trail's routed node path, written for readers that cannot route themselves.
+pub fn save(a: &Annotations, path: &Path, trail_paths: &BTreeMap<String, Vec<i64>>) -> Result<(), String> {
     let tmp = path.with_extension("h5.tmp");
-    write_file(a, &tmp).map_err(|e| e.to_string())?;
+    write_file(a, &tmp, trail_paths).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-fn write_file(a: &Annotations, path: &Path) -> H5 {
+fn write_file(a: &Annotations, path: &Path, trail_paths: &BTreeMap<String, Vec<i64>>) -> H5 {
     let f = hdf5_metno::File::create(path)?;
     let attr_str = |name: &str, value: &str| -> H5 {
         f.new_attr::<VarLenUnicode>().shape(()).create(name)?.as_writer().write_scalar(&vlu(value))
@@ -278,6 +295,24 @@ fn write_file(a: &Annotations, path: &Path) -> H5 {
     ints(&g, "id", &id)?;
     strs(&g, "text", &a.notes.values().cloned().collect::<Vec<_>>())?;
 
+    // Trails: names, waypoints and routed node paths, both CSR (offsets has n + 1 entries).
+    let g = f.create_group("trails")?;
+    let csr = |lists: &mut dyn Iterator<Item = Vec<i64>>| -> (Vec<i64>, Vec<i64>) {
+        let (mut offsets, mut values) = (vec![0], vec![]);
+        for l in lists {
+            values.extend(l);
+            offsets.push(values.len() as i64);
+        }
+        (offsets, values)
+    };
+    strs(&g, "name", &a.trails.keys().cloned().collect::<Vec<_>>())?;
+    let (wo, wv) = csr(&mut a.trails.values().cloned());
+    ints(&g, "waypoint_offsets", &wo)?;
+    ints(&g, "waypoints", &wv)?;
+    let (no, nv) = csr(&mut a.trails.keys().map(|n| trail_paths.get(n).cloned().unwrap_or_default()));
+    ints(&g, "node_offsets", &no)?;
+    ints(&g, "nodes", &nv)?;
+
     let g = f.create_group("history")?;
     ints(&g, "utc", &a.history.iter().map(|h| h.utc).collect::<Vec<_>>())?;
     strs(&g, "author", &a.history.iter().map(|h| h.author.clone()).collect::<Vec<_>>())?;
@@ -327,6 +362,16 @@ fn read_file(path: &Path) -> hdf5_metno::Result<Annotations> {
             (target, text)
         })
         .collect();
+    // Optional: files written before trails existed have no /trails.
+    if let (Ok(names), Ok(offsets), Ok(points)) =
+        (strs("trails/name"), ints("trails/waypoint_offsets"), ints("trails/waypoints"))
+    {
+        a.trails = names
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| (name, points[offsets[i] as usize..offsets[i + 1] as usize].to_vec()))
+            .collect();
+    }
     let (utc, authors, ops) = (ints("history/utc")?, strs("history/author")?, strs("history/op")?);
     a.history = (0..utc.len())
         .map(|i| HistoryRow { utc: utc[i], author: authors[i].clone(), op: ops[i].clone() })
@@ -362,11 +407,12 @@ mod tests {
         a.edit(Op::SetRoot(9188, true));
         a.edit(Op::AddEdge(AddedEdge { id: a.next_added_id(), u: 1, v: 2 }));
         a.edit(Op::SetNote(Target::Edge(812), Some("false bridge".into())));
+        a.edit(Op::SetTrail("main".into(), Some(vec![1, 2, 9188])));
 
         let dir = std::env::temp_dir().join(format!("gramf-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("annotations.simon.h5");
-        save(&a, &path).unwrap();
+        save(&a, &path, &BTreeMap::new()).unwrap();
         let b = load(&path).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
 
@@ -377,7 +423,8 @@ mod tests {
         assert_eq!(b.roots, a.roots);
         assert_eq!(b.added, [AddedEdge { id: ADDED_EDGE_ID_START, u: 1, v: 2 }]);
         assert_eq!(b.notes, a.notes);
-        assert_eq!(b.history.len(), 6);
+        assert_eq!(b.trails, a.trails);
+        assert_eq!(b.history.len(), 7);
         assert!(!b.dirty);
     }
 
@@ -387,7 +434,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = dir.join("stg_store.h5");
         let path = path_for(&store, "anna");
-        save(&Annotations::new("anna", ""), &path).unwrap();
+        save(&Annotations::new("anna", ""), &path, &BTreeMap::new()).unwrap();
         assert!(load(&path).unwrap().is_empty());
         assert_eq!(list(&store), [("anna".to_string(), path)]);
         std::fs::remove_dir_all(&dir).unwrap();

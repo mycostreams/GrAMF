@@ -3,6 +3,7 @@ mod dev_panel;
 mod export_dialog;
 #[cfg(target_os = "macos")]
 mod native_menu;
+mod settings_window;
 mod ui;
 
 use crate::annotations::{self, AddedEdge, Annotations, Op};
@@ -13,6 +14,7 @@ use crate::renderer::AppRenderer;
 use crate::store::Store;
 use crate::time::TimeAxis;
 use egui_winit::State;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use web_time::Instant;
@@ -53,6 +55,11 @@ pub struct App {
     /// Registry UI of the open plate, else the id found in its path; names export folders.
     plate: String,
     dev: dev_panel::DevState,
+    settings: crate::settings::Settings,
+    settings_window: settings_window::SettingsWindow,
+    /// Routed trails per (author, name): the waypoints and added-edge count they were routed
+    /// with, and the node path (`None`: no path).
+    trail_routes: HashMap<(String, String), (Vec<i64>, usize, Option<Vec<i64>>)>,
     /// Raw rows for an edge, loaded while the inspector's Raw rows section is open.
     raw: Option<(usize, Vec<crate::devtools::RawTable>)>,
     raw_wanted: bool,
@@ -86,7 +93,48 @@ impl App {
     pub fn new(open: Option<PathBuf>) -> Self {
         Self {
             pending_open: open,
+            settings: crate::settings::Settings::load(),
             ..Default::default()
+        }
+    }
+
+    /// The registry record for the store at `path`, a short status for the top bar, and the
+    /// plate name (registry UI, else the id found in the path) that names export folders.
+    fn resolve_plate(settings: &crate::settings::Settings, path: &Path) -> (Option<registry::PlateRecord>, String, String) {
+        let candidates = registry::plate_candidates(path);
+        let plate = registry::lookup(&settings.registry(), &candidates);
+        let status = match &plate {
+            Some(p) => p.ui.clone(),
+            None if candidates.is_empty() => "plate id not found in path".into(),
+            None => format!("{} not in registry", candidates[0]),
+        };
+        let name = plate
+            .as_ref()
+            .map(|p| p.ui.clone())
+            .or_else(|| candidates.first().cloned())
+            .unwrap_or_else(|| "plate".into());
+        (plate, status, name)
+    }
+
+    /// Applies saved settings: author switch, registry re-lookup, persisted to disk.
+    fn apply_settings(&mut self, new: crate::settings::Settings) {
+        let old = std::mem::replace(&mut self.settings, new);
+        if let Err(e) = self.settings.save() {
+            self.status = format!("Could not save settings: {e}");
+        }
+        if let (Some(path), Some(store)) = (self.store_path.clone(), self.store.as_ref()) {
+            if old.author != self.settings.author && !self.dirty() {
+                let (annot, _) = load_annotations(&path, store, &self.settings.author);
+                self.annot = Some(annot);
+            }
+            if old.registry() != self.settings.registry() {
+                let (plate, _, _) = Self::resolve_plate(&self.settings, &path);
+                if let Some(t) = self.timeline.as_mut() {
+                    t.axis.inoculation = plate.as_ref().and_then(|p| p.inoculation);
+                    let first = t.axis.timepoints[0];
+                    t.axis.crossing = plate.and_then(|p| p.crossed).map_or((first, true), |c| (c, false));
+                }
+            }
         }
     }
 
@@ -132,19 +180,10 @@ impl App {
         self.dev.timings.load_ms = ms(started);
         let started = Instant::now();
 
-        let candidates = registry::plate_candidates(path);
-        let plate = registry::default_dir().and_then(|dir| registry::lookup(&dir, &candidates));
-        let plate_status = match &plate {
-            Some(p) => p.ui.clone(),
-            None if candidates.is_empty() => "plate id not found in path".into(),
-            None => format!("{} not in registry", candidates[0]),
-        };
+        let (plate, plate_status, plate_name) = Self::resolve_plate(&self.settings, path);
         self.status = format!("{plate_status} · {} edges", store.arcs.n_edges());
-        self.plate = plate
-            .as_ref()
-            .map(|p| p.ui.clone())
-            .or_else(|| candidates.first().cloned())
-            .unwrap_or_else(|| "plate".into());
+        self.plate = plate_name;
+
 
         self.timeline = TimeAxis::new(
             store.timepoints.clone(),
@@ -155,7 +194,7 @@ impl App {
         .map(ui::Timeline::new);
         renderer.time = self.timeline.as_ref().map_or(f32::MAX, |t| t.index as f32);
 
-        let (annot, errors) = load_annotations(path, &store, &annotate::load_author());
+        let (annot, errors) = load_annotations(path, &store, &self.settings.author);
         if !errors.is_empty() {
             self.status = format!("{} · could not read {}", self.status, errors.join(", "));
         }
@@ -215,10 +254,20 @@ impl App {
     }
 
     fn save_annotations(&mut self) -> bool {
+        self.refresh_trail_routes();
         let Some(st) = self.annot.as_mut() else {
             return false;
         };
-        match annotations::save(&st.own, &st.own_path) {
+        let trail_paths: std::collections::BTreeMap<String, Vec<i64>> = st
+            .own
+            .trails
+            .keys()
+            .filter_map(|name| {
+                let path = self.trail_routes.get(&(st.author.clone(), name.clone()))?.2.clone()?;
+                Some((name.clone(), path))
+            })
+            .collect();
+        match annotations::save(&st.own, &st.own_path, &trail_paths) {
             Ok(()) => {
                 st.own.dirty = false;
                 self.status = format!("Saved {}", st.own_path.display());
@@ -289,6 +338,36 @@ impl App {
         self.dev.timings.export_ms = ms(started);
     }
 
+    /// Re-routes trails whose waypoints or added edges changed since they were last routed.
+    fn refresh_trail_routes(&mut self) {
+        let (Some(store), Some(st)) = (self.store.as_ref(), self.annot.as_ref()) else {
+            return;
+        };
+        let layers = std::iter::once(&st.own).chain(st.others.iter().map(|(a, _)| a));
+        let mut live = std::collections::HashSet::new();
+        for a in layers {
+            let pos = |id: &i64| store.node_index.get(id).map(|&n| store.node_pos[n]);
+            for (name, waypoints) in &a.trails {
+                let key = (a.author.clone(), name.clone());
+                live.insert(key.clone());
+                let fresh = self.trail_routes.get(&key).is_some_and(|(w, n, _)| w == waypoints && *n == a.added.len());
+                if !fresh {
+                    let extra: Vec<(i64, i64, f32)> = a
+                        .added
+                        .iter()
+                        .filter_map(|e| {
+                            let (p, q) = (pos(&e.u)?, pos(&e.v)?);
+                            Some((e.u, e.v, ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2)).sqrt()))
+                        })
+                        .collect();
+                    let route = store.route(waypoints, &extra);
+                    self.trail_routes.insert(key, (waypoints.clone(), a.added.len(), route));
+                }
+            }
+        }
+        self.trail_routes.retain(|k, _| live.contains(k));
+    }
+
     /// Quits, or first asks what to do with unsaved annotations.
     fn request_quit(&mut self) {
         if self.dirty() {
@@ -313,6 +392,7 @@ impl App {
                 Command::ResetCamera => actions.fit = true,
                 Command::Developer => self.dev.open = !self.dev.open,
                 Command::Quit => self.request_quit(),
+                Command::Settings => actions.open_settings = true,
             }
             self.apply(actions);
         }
@@ -393,6 +473,19 @@ impl App {
                     ui::Selection::Edge(e)
                 }
             }),
+            Tool::Trail => node().map(|n| {
+                let id = store.node_ids[n];
+                let name = st.active_trail.clone().filter(|t| st.own.trails.contains_key(t)).unwrap_or_else(|| {
+                    (1..).map(|k| format!("trail {k}")).find(|t| !st.own.trails.contains_key(t)).expect("unbounded")
+                });
+                let mut waypoints = st.own.trails.get(&name).cloned().unwrap_or_default();
+                if waypoints.last() != Some(&id) {
+                    waypoints.push(id);
+                    op = Some(Op::SetTrail(name.clone(), Some(waypoints)));
+                }
+                st.active_trail = Some(name);
+                ui::Selection::Node(n)
+            }),
             Tool::AddEdge => node().map(|n| match st.first.take() {
                 Some(first) if first != n => {
                     let added = AddedEdge {
@@ -469,12 +562,11 @@ impl App {
         if actions.save {
             self.save_annotations();
         }
-        if let Some(name) = actions.switch_author {
-            if let (Some(path), Some(store)) = (self.store_path.as_ref(), self.store.as_ref()) {
-                annotate::save_author(&name);
-                let (annot, _) = load_annotations(path, store, &name);
-                self.annot = Some(annot);
-            }
+        if actions.open_settings {
+            self.settings_window.open(&self.settings);
+        }
+        if let Some(new) = actions.settings_saved {
+            self.apply_settings(new);
         }
         if let Some(choice) = actions.choice {
             if let Some(pending) = self.confirm.take() {
@@ -558,6 +650,49 @@ fn pick_added(store: &Store, st: &AnnotationState, at: [f32; 2], radius: f32) ->
         .map(|(id, _)| id)
 }
 
+const TRAIL: egui::Color32 = egui::Color32::from_rgb(235, 90, 210);
+
+/// Every visible author's trails, in points: the routed path (straight dashed legs when no
+/// path exists) and waypoints as shapes, plus each trail's name at its first waypoint as a
+/// map text. The active trail is thicker.
+fn trail_overlay(
+    store: &Store,
+    st: &AnnotationState,
+    routes: &HashMap<(String, String), (Vec<i64>, usize, Option<Vec<i64>>)>,
+    renderer: &AppRenderer,
+    ppp: f32,
+) -> (Vec<egui::Shape>, Vec<(egui::Pos2, String, egui::Color32)>) {
+    use egui::{Color32, Shape, Stroke};
+    let to_pt = |p: [f32; 2]| {
+        let [x, y] = renderer.world_to_screen(p);
+        egui::pos2(x / ppp, y / ppp)
+    };
+    let pos = |id: &i64| store.node_index.get(id).map(|&n| store.node_pos[n]);
+    let (mut shapes, mut texts) = (vec![], vec![]);
+    let layers = std::iter::once((&st.own, st.own_visible, true)).chain(st.others.iter().map(|(a, v)| (a, *v, false)));
+    for (a, _, own) in layers.filter(|l| l.1) {
+        let colour = if own { TRAIL } else { Color32::from_rgba_unmultiplied(235, 90, 210, 110) };
+        for (name, waypoints) in &a.trails {
+            let active = own && st.active_trail.as_deref() == Some(name.as_str());
+            let stroke = Stroke::new(if active { 4.0 } else if own { 3.0 } else { 2.0 }, colour);
+            match routes.get(&(a.author.clone(), name.clone())).and_then(|r| r.2.as_ref()) {
+                Some(path) => shapes.push(Shape::line(store.path_polyline(path).into_iter().map(to_pt).collect(), stroke)),
+                None => {
+                    let points: Vec<egui::Pos2> = waypoints.iter().filter_map(pos).map(to_pt).collect();
+                    shapes.extend(Shape::dashed_line(&points, stroke, 5.0, 5.0));
+                }
+            }
+            for p in waypoints.iter().filter_map(pos) {
+                shapes.push(Shape::circle_filled(to_pt(p), if active { 5.0 } else { 3.5 }, colour));
+            }
+            if let Some(first) = waypoints.first().and_then(pos) {
+                texts.push((to_pt(first) + egui::vec2(8.0, -10.0), name.clone(), colour));
+            }
+        }
+    }
+    (shapes, texts)
+}
+
 /// Feedback for the current tool, in points: node dots and the node under the cursor for node
 /// tools, a rubber band from the first node while adding an edge, and the box being dragged.
 fn tool_overlay(
@@ -596,6 +731,15 @@ fn tool_overlay(
         let accent = Color32::from_rgb(60, 210, 230);
         if let Some(n) = hover {
             shapes.push(Shape::circle_stroke(to_pt(store.node_pos[n]), 7.0, Stroke::new(2.0, accent)));
+        }
+        let trail_end = (st.tool == Tool::Trail)
+            .then(|| st.active_trail.as_ref().and_then(|t| st.own.trails.get(t)?.last()))
+            .flatten()
+            .and_then(|id| store.node_index.get(id).copied());
+        if let Some(last) = trail_end {
+            let from = to_pt(store.node_pos[last]);
+            let to = hover.map_or(cursor_pt, |n| to_pt(store.node_pos[n]));
+            shapes.extend(Shape::dashed_line(&[from, to], Stroke::new(2.0, TRAIL), 6.0, 4.0));
         }
         if let (Tool::AddEdge, Some(first)) = (st.tool, st.first) {
             let from = to_pt(store.node_pos[first]);
@@ -861,10 +1005,29 @@ impl ApplicationHandler for App {
                     _ => vec![],
                 };
                 let mut overlay = overlay;
+                let mut map_texts = vec![];
                 if let (Some(store), Some(st)) = (self.store.as_ref(), self.annot.as_ref()) {
                     let cursor = [self.cursor.x as f32, self.cursor.y as f32];
+                    let (trail_shapes, texts) = trail_overlay(store, st, &self.trail_routes, renderer, ppp);
+                    overlay.extend(trail_shapes);
+                    map_texts = texts;
                     overlay.extend(tool_overlay(store, st, renderer, ppp, cursor, self.box_start));
                 }
+                let unreachable_trails: Vec<String> = self
+                    .annot
+                    .as_ref()
+                    .map(|st| {
+                        st.own
+                            .trails
+                            .iter()
+                            .filter(|(name, w)| {
+                                w.len() >= 2
+                                    && self.trail_routes.get(&(st.author.clone(), (*name).clone())).is_some_and(|r| r.2.is_none())
+                            })
+                            .map(|(name, _)| name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 if let Some(timeline) = self.timeline.as_mut() {
                     timeline.advance(delta_time.as_secs_f32());
                 }
@@ -901,6 +1064,9 @@ impl ApplicationHandler for App {
                             raw: self.raw.as_ref(),
                             boxed: &self.boxed,
                             reveal: self.reveal.is_some(),
+                            settings_window: &mut self.settings_window,
+                            unreachable_trails: &unreachable_trails,
+                            map_texts: &map_texts,
                         },
                     );
                 });
@@ -987,6 +1153,7 @@ impl ApplicationHandler for App {
             self.open_store(&path);
         }
         self.refresh_dev();
+        self.refresh_trail_routes();
         if let Some(tag) = self.update_check.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.update = Some(tag);
         }
