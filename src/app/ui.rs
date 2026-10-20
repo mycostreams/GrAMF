@@ -169,6 +169,7 @@ pub struct UiActions {
     pub choose_videos: bool,
     pub detect_camera: bool,
     pub save_setup_default: bool,
+    pub publish: bool,
     pub fit: bool,
     /// The inspector's Raw rows section is open: keep the rows for the selected edge loaded.
     pub raw_wanted: bool,
@@ -295,7 +296,7 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             match (registering, annot.as_deref_mut()) {
                 (false, Some(st)) => annotate::toolbar(ui, st),
                 (true, _) => match reg.as_deref_mut() {
-                    Some(r) => registration::toolbar(ui, r),
+                    Some(r) => actions.publish = registration::toolbar(ui, r),
                     None => {
                         ui.label(egui::RichText::new("choose the plate's video runs folder (left panel)").weak());
                     }

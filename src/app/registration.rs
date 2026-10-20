@@ -678,7 +678,8 @@ pub fn run_bar(ui: &mut egui::Ui, reg: &mut Registration) {
 }
 
 /// Tool buttons for the registration workspace.
-pub fn toolbar(ui: &mut egui::Ui, reg: &mut Registration) {
+/// Returns true when Publish to store… was clicked.
+pub fn toolbar(ui: &mut egui::Ui, reg: &mut Registration) -> bool {
     for (tool, _, label) in RegTool::ALL {
         if ui.selectable_label(reg.tool == tool, label).clicked() {
             reg.tool = tool;
@@ -694,6 +695,11 @@ pub fn toolbar(ui: &mut egui::Ui, reg: &mut Registration) {
         reg.set_params(reg.camera(), threshold, snap);
     }
     ui.separator();
+    let publish = ui
+        .button("Publish to store…")
+        .on_hover_text("write your verified flow layer, trails and roots into stg_store.h5, for tools that do not read annotation files yet")
+        .clicked();
+    ui.separator();
     let hint = match (reg.tool, reg.position) {
         (RegTool::Select, None) => "click a video on the map, or a dot in the stage scatter",
         (RegTool::Select, Some(_)) => "click a video edge to see its STG chain and flow",
@@ -706,6 +712,7 @@ pub fn toolbar(ui: &mut egui::Ui, reg: &mut Registration) {
         (RegTool::Nudge, Some(_)) => "drag to move this run's video graph; the snap refines from where you leave it",
     };
     ui.label(egui::RichText::new(hint).weak());
+    publish
 }
 
 /// Placed videos of the selected session, in points: each shown run's snapped graph and frame

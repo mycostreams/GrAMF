@@ -337,18 +337,10 @@ impl App {
             flow_note = format!(" · flow: {sessions} verified sessions, {runs} runs, {} measurements", flow.measurements.len());
             st.own.flow = (!flow.runs.is_empty()).then_some(flow);
         }
+        let trail_paths = self.trail_paths();
         let Some(st) = self.annot.as_mut() else {
             return false;
         };
-        let trail_paths: std::collections::BTreeMap<String, Vec<i64>> = st
-            .own
-            .trails
-            .keys()
-            .filter_map(|name| {
-                let path = self.trail_routes.get(&(st.author.clone(), name.clone()))?.2.clone()?;
-                Some((name.clone(), path))
-            })
-            .collect();
         match annotations::save(&st.own, &st.own_path, &trail_paths) {
             Ok(()) => {
                 st.own.dirty = false;
@@ -359,6 +351,80 @@ impl App {
                 self.status = format!("Could not save {}: {e}", st.own_path.display());
                 false
             }
+        }
+    }
+
+    /// The active author's trails' routed node paths.
+    fn trail_paths(&self) -> std::collections::BTreeMap<String, Vec<i64>> {
+        let Some(st) = self.annot.as_ref() else {
+            return Default::default();
+        };
+        st.own
+            .trails
+            .keys()
+            .filter_map(|name| {
+                let path = self.trail_routes.get(&(st.author.clone(), name.clone()))?.2.clone()?;
+                Some((name.clone(), path))
+            })
+            .collect()
+    }
+
+    /// Publish to store (DESIGN.md §10): saves, asks, then writes the active author's flow
+    /// layer, trails and roots into the store.
+    fn publish_to_store(&mut self) {
+        if !self.save_annotations() {
+            return;
+        }
+        let trail_paths = self.trail_paths();
+        let (Some(store), Some(path), Some(st)) = (self.store.as_mut(), self.store_path.as_ref(), self.annot.as_ref()) else {
+            return;
+        };
+        let Some(flow) = st.own.flow.as_ref() else {
+            self.status = "Nothing to publish: verify a session first".into();
+            return;
+        };
+        let question = format!(
+            "Write {}'s flow layer ({} runs, {} measurements), {} trails and {} roots into {}?\n\n\
+             This replaces the store's /flow_runs, /flow_measurements, /flow_trails_* and /root_nodes. \
+             Nothing else in the store changes.",
+            st.author,
+            flow.runs.len(),
+            flow.measurements.len(),
+            st.own.trails.len(),
+            st.own.roots.len(),
+            path.display()
+        );
+        let ok = rfd::MessageDialog::new()
+            .set_title("Publish to store")
+            .set_description(question)
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        if ok != rfd::MessageDialogResult::Ok {
+            return;
+        }
+        match annotations::publish(&st.own, path, store.n_edges(), &trail_paths) {
+            Ok(p) => {
+                // what the store now holds, without re-reading it
+                store.root_nodes = st.own.roots.iter().copied().collect();
+                store.trails_in_store = trail_paths.into_iter().collect();
+                store.flow_in_store = Some(crate::store::FlowLayer {
+                    run_paths: flow.runs.iter().map(|r| r.run_path.to_string()).collect(),
+                    n_measurements: p.measurements,
+                    written_by: "GrAMF".into(),
+                });
+                let skipped = match p.on_added_edges {
+                    0 => String::new(),
+                    n => format!(" ({n} on added edges stay in the annotation file)"),
+                };
+                self.status = format!(
+                    "Published to {}: {} measurements{skipped}, {} trails, {} roots",
+                    path.display(),
+                    p.measurements,
+                    p.trails,
+                    p.roots
+                );
+            }
+            Err(e) => self.status = format!("Could not publish to {}: {e}", path.display()),
         }
     }
 
@@ -713,6 +779,9 @@ impl App {
         }
         if actions.choose_videos {
             self.choose_videos();
+        }
+        if actions.publish {
+            self.publish_to_store();
         }
         if actions.detect_camera || actions.save_setup_default {
             self.camera_and_default(actions.detect_camera, actions.save_setup_default);
