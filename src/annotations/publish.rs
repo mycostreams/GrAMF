@@ -12,6 +12,8 @@ pub struct Published {
     pub on_added_edges: usize,
     pub trails: usize,
     pub roots: usize,
+    /// The store as it was, kept beside it.
+    pub backup: std::path::PathBuf,
 }
 
 /// Publish to store (DESIGN.md §10, a temporary bridge): writes the flow layer, trails and
@@ -19,20 +21,38 @@ pub struct Published {
 /// replacing what is there. The one place GrAMF writes a store, so it refuses a store whose
 /// backbone changed, and works on a copy renamed over the original only when complete.
 pub fn publish(a: &Annotations, store: &Path, n_edges: usize, trail_paths: &BTreeMap<String, Vec<i64>>) -> Result<Published, String> {
+    let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
+    publish_with_backup(a, store, n_edges, trail_paths, &format!("bak-before-gramf-publish-{stamp}"))
+}
+
+/// [`publish`], keeping the store as it was as `<store>.<suffix>`: the original is renamed
+/// to the backup and the completed copy renamed into its place, so nothing is ever lost.
+pub(super) fn publish_with_backup(a: &Annotations, store: &Path, n_edges: usize, trail_paths: &BTreeMap<String, Vec<i64>>, suffix: &str) -> Result<Published, String> {
     let flow = a.flow.as_ref().ok_or("no flow layer: verify a session and save first")?;
+    let mut backup = store.as_os_str().to_owned();
+    backup.push(format!(".{suffix}"));
+    let backup = std::path::PathBuf::from(backup);
+    if backup.exists() {
+        return Err(format!("{} exists already", backup.display()));
+    }
     let tmp = store.with_extension("h5.publishing");
     std::fs::copy(store, &tmp).map_err(|e| e.to_string())?;
-    let result = publish_into(a, flow, &tmp, n_edges, trail_paths).map_err(|e| e.to_string());
-    match result {
-        Ok(Ok(p)) => std::fs::rename(&tmp, store).map(|_| p).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            e.to_string()
-        }),
-        Ok(Err(e)) | Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(e)
-        }
+    let written = match publish_into(a, flow, &tmp, n_edges, trail_paths) {
+        Ok(Ok(p)) => p,
+        Ok(Err(e)) => return Err(cleanup(&tmp, e)),
+        Err(e) => return Err(cleanup(&tmp, e.to_string())),
+    };
+    std::fs::rename(store, &backup).map_err(|e| cleanup(&tmp, e.to_string()))?;
+    if let Err(e) = std::fs::rename(&tmp, store) {
+        let _ = std::fs::rename(&backup, store); // put the original back
+        return Err(cleanup(&tmp, e.to_string()));
     }
+    Ok(Published { backup, ..written })
+}
+
+fn cleanup(tmp: &Path, e: String) -> String {
+    let _ = std::fs::remove_file(tmp);
+    e
 }
 
 fn publish_into(a: &Annotations, flow: &FlowOutput, path: &Path, n_edges: usize, trail_paths: &BTreeMap<String, Vec<i64>>) -> hdf5_metno::Result<Result<Published, String>> {
@@ -81,5 +101,6 @@ fn publish_into(a: &Annotations, flow: &FlowOutput, path: &Path, n_edges: usize,
         on_added_edges: flow.measurements.len() - measurements.len(),
         trails: names.len(),
         roots: roots.len(),
+        backup: Default::default(),
     }))
 }

@@ -304,6 +304,46 @@ impl App {
     /// Publish to store (DESIGN.md §10): saves, asks, then writes the active author's flow
     /// layer, trails and roots into the store.
     pub(super) fn publish_to_store(&mut self) {
+        // Publishing replaces the store's trails and roots with the annotations': offer to import
+        // the ones the annotations lack, so they are not dropped by accident.
+        if let (Some(store), Some(st)) = (self.store.as_ref(), self.annot.as_mut()) {
+            let roots: Vec<i64> = store.root_nodes.iter().copied().filter(|n| !st.own.roots.contains(n)).collect();
+            let trails: Vec<(String, Vec<i64>)> =
+                store.trails_in_store.iter().filter(|(name, _)| !st.own.trails.contains_key(name)).cloned().collect();
+            if !roots.is_empty() || !trails.is_empty() {
+                let names = trails.iter().map(|t| format!("\"{}\"", t.0)).collect::<Vec<_>>().join(", ");
+                let what = [
+                    (!roots.is_empty()).then(|| format!("{} roots", roots.len())),
+                    (!trails.is_empty()).then(|| format!("{} trail(s) {names}", trails.len())),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" and ");
+                let answer = rfd::MessageDialog::new()
+                    .set_title("Publish to store")
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_description(format!(
+                        "The store has {what} that your annotations don't have. Publishing replaces the store's \
+                         trails and roots with yours, so these would be dropped (the backup keeps them).\n\n\
+                         Import them into your annotations first?"
+                    ))
+                    .set_buttons(rfd::MessageButtons::YesNoCancel)
+                    .show();
+                match answer {
+                    rfd::MessageDialogResult::Yes => {
+                        for n in roots {
+                            st.own.edit(Op::SetRoot(n, true));
+                        }
+                        for (name, nodes) in trails {
+                            st.own.edit(Op::SetTrail(name, Some(nodes)));
+                        }
+                    }
+                    rfd::MessageDialogResult::No => {}
+                    _ => return,
+                }
+            }
+        }
         if !self.save_annotations() {
             return;
         }
@@ -315,9 +355,14 @@ impl App {
             self.status = "Nothing to publish: verify a session first".into();
             return;
         };
+        let current = store.flow_in_store.as_ref().map_or("none".to_string(), |f| {
+            let who = if f.written_by.is_empty() { "unknown writer" } else { f.written_by.as_str() };
+            format!("{} runs written by {who}", f.run_paths.len())
+        });
         let question = format!(
             "Write {}'s flow layer ({} runs, {} measurements), {} trails and {} roots into {}?\n\n\
-             This replaces the store's /flow_runs, /flow_measurements, /flow_trails_* and /root_nodes. \
+             This replaces the store's flow layer (now: {current}), /flow_trails_* and /root_nodes. \
+             The store as it is now is kept beside it as stg_store.h5.bak-before-gramf-publish-<date>. \
              Nothing else in the store changes.",
             st.author,
             flow.runs.len(),
@@ -349,11 +394,12 @@ impl App {
                     n => format!(" ({n} on added edges stay in the annotation file)"),
                 };
                 self.status = format!(
-                    "Published to {}: {} measurements{skipped}, {} trails, {} roots",
+                    "Published to {}: {} measurements{skipped}, {} trails, {} roots; the previous store is kept as {}",
                     path.display(),
                     p.measurements,
                     p.trails,
-                    p.roots
+                    p.roots,
+                    p.backup.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())
                 );
             }
             Err(e) => self.status = format!("Could not publish to {}: {e}", path.display()),

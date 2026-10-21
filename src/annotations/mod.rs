@@ -387,8 +387,14 @@ mod tests {
         a.flow = Some(FlowOutput { runs: vec![run], measurements: vec![m(4), m(ADDED_EDGE_ID_START)], cutoff_um: 8.0, n_anchors: 2, n_pins: 0 });
         let paths = BTreeMap::from([("main".to_string(), vec![1, 5, 2])]);
 
-        let p = publish(&a, &store, 10, &paths).unwrap();
-        assert_eq!(p, Published { measurements: 1, on_added_edges: 1, trails: 1, roots: 1 });
+        let p = publish::publish_with_backup(&a, &store, 10, &paths, "bak1").unwrap();
+        let backup = dir.join("stg_store.h5.bak1");
+        assert_eq!(p, Published { measurements: 1, on_added_edges: 1, trails: 1, roots: 1, backup: backup.clone() });
+        // the backup is the store as it was
+        let b = hdf5_metno::File::open(&backup).unwrap();
+        assert_eq!(b.dataset("root_nodes").unwrap().read_raw::<i64>().unwrap(), [7]);
+        assert!(!b.link_exists("flow_runs"));
+        drop(b);
         let f = hdf5_metno::File::open(&store).unwrap();
         assert_eq!(f.dataset("root_nodes").unwrap().read_raw::<i64>().unwrap(), [3]);
         assert_eq!(f.dataset("flow_trails_nodes").unwrap().read_raw::<i64>().unwrap(), [1, 5, 2]);
@@ -396,8 +402,10 @@ mod tests {
         drop(f);
 
         a.fingerprint = "changed".into();
-        assert!(publish(&a, &store, 10, &paths).is_err());
+        assert!(publish::publish_with_backup(&a, &store, 10, &paths, "bak2").is_err());
         assert!(!store.with_extension("h5.publishing").exists());
+        assert!(!dir.join("stg_store.h5.bak2").exists(), "a refused publish leaves no backup");
+        assert!(store.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
