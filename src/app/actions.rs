@@ -192,12 +192,13 @@ impl App {
         }
         self.annot = Some(annot);
         self.store_path = Some(path.to_path_buf());
-        // Video runs beside the store (or one folder up, for <plate>/data/stg_store.h5).
+        // Video runs beside the store (or one folder up, for <plate>/data/stg_store.h5), named
+        // polyflow_analysis (registrator) or polyflow_data (paper_plates sessions).
         self.reg = path
             .ancestors()
             .skip(1)
             .take(2)
-            .map(|dir| dir.join("polyflow_analysis"))
+            .flat_map(|dir| [dir.join("polyflow_analysis"), dir.join("polyflow_data")])
             .find(|dir| dir.is_dir())
             .and_then(|dir| crate::video::runs::scan(&dir).ok())
             .map(|videos| {
