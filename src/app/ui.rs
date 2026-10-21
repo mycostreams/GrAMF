@@ -145,7 +145,7 @@ pub struct FrameState<'a> {
     pub map_texts: &'a [(egui::Pos2, String, egui::Color32)],
     pub workflow: &'a mut Workflow,
     /// The user's added edges as segments, for matching video edges onto them.
-    pub added_segments: &'a [crate::matching::AddedSegment],
+    pub added_segments: &'a [crate::video::matching::AddedSegment],
     /// The plate's video runs, when found.
     pub reg: Option<&'a mut Registration>,
 }

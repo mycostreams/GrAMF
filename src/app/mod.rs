@@ -164,7 +164,7 @@ impl App {
         let Some(dir) = dialog.pick_folder() else {
             return;
         };
-        match crate::videos::scan(&dir) {
+        match crate::video::runs::scan(&dir) {
             Ok(v) if !v.positions.is_empty() => {
                 let default = self.settings.setup_default(&v.setup.name());
                 self.reg = Some(registration::Registration::new(v, self.settings.session_gap_minutes, store, default));
@@ -268,7 +268,7 @@ impl App {
             .take(2)
             .map(|dir| dir.join("polyflow_analysis"))
             .find(|dir| dir.is_dir())
-            .and_then(|dir| crate::videos::scan(&dir).ok())
+            .and_then(|dir| crate::video::runs::scan(&dir).ok())
             .map(|videos| {
                 let default = self.settings.setup_default(&videos.setup.name());
                 registration::Registration::new(videos, self.settings.session_gap_minutes, &store, default)
@@ -599,14 +599,14 @@ impl App {
             (registration::RegTool::Assign, Some(_)) => {
                 let edge = store
                     .pick_edge(at, radius, f32::MAX)
-                    .map(crate::matching::EdgeRef::Pipeline)
+                    .map(crate::video::matching::EdgeRef::Pipeline)
                     .or_else(|| {
                         added
                             .iter()
                             .map(|a| (crate::store::segment_dist2(at, a.a, a.b).sqrt(), a.id))
                             .filter(|x| x.0 <= radius)
                             .min_by(|a, b| a.0.total_cmp(&b.0))
-                            .map(|x| crate::matching::EdgeRef::Added(x.1))
+                            .map(|x| crate::video::matching::EdgeRef::Added(x.1))
                     });
                 if let Some(op) = edge.and_then(|e| registration::toggle_in_chain(reg, store, &added, e)) {
                     reg.pending.push(op);
@@ -822,12 +822,12 @@ fn ms(since: Instant) -> f64 {
 }
 
 /// The user's own added edges as straight segments (matching includes them).
-fn added_segments(store: &Store, annot: Option<&AnnotationState>) -> Vec<crate::matching::AddedSegment> {
+fn added_segments(store: &Store, annot: Option<&AnnotationState>) -> Vec<crate::video::matching::AddedSegment> {
     let pos = |id: &i64| store.node_index.get(id).map(|&n| store.node_pos[n]);
     annot
         .into_iter()
         .flat_map(|st| &st.own.added)
-        .filter_map(|e| Some(crate::matching::AddedSegment { id: e.id, a: pos(&e.u)?, b: pos(&e.v)? }))
+        .filter_map(|e| Some(crate::video::matching::AddedSegment { id: e.id, a: pos(&e.u)?, b: pos(&e.v)? }))
         .collect()
 }
 
@@ -1373,7 +1373,7 @@ impl ApplicationHandler for App {
                 if let (registration::Workflow::Registration, Some(reg), Some(timeline)) =
                     (self.workflow, self.reg.as_ref(), self.timeline.as_mut())
                 {
-                    if let Some(f) = reg.selected_run_utc().and_then(|t| crate::videos::stg_frame(t, &timeline.axis.timepoints)) {
+                    if let Some(f) = reg.selected_run_utc().and_then(|t| crate::video::runs::stg_frame(t, &timeline.axis.timepoints)) {
                         timeline.index = f;
                     }
                 }

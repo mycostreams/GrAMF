@@ -1,6 +1,6 @@
 //! User settings, kept in `~/.gramf/settings` as `key = value` lines (hand-editable).
 
-use crate::placement::Similarity;
+use crate::video::placement::Similarity;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

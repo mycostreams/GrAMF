@@ -3,13 +3,13 @@
 //! on the map. Matching (R4) and corrections (R5) come later.
 
 use crate::annotations::{Op, RegistrationLayer};
-use crate::flow::RunFlow;
-use crate::matching::{self, AddedSegment, EdgeCover, EdgeRef, Rigid};
-use crate::placement::{self, Similarity};
+use crate::video::flow::RunFlow;
+use crate::video::matching::{self, AddedSegment, EdgeCover, EdgeRef, Rigid};
+use crate::video::placement::{self, Similarity};
 use crate::settings::SetupDefault;
 use crate::store::Store;
 use crate::time::{TimeAxis, TimeUnit};
-use crate::videos::{Session, VideoGraph, Videos};
+use crate::video::runs::{Session, VideoGraph, Videos};
 use egui::{Color32, Pos2, Stroke};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -125,9 +125,9 @@ pub struct Registration {
 
 impl Registration {
     pub fn new(videos: Videos, gap_minutes: f32, store: &Store, default: Option<SetupDefault>) -> Self {
-        let sessions = crate::videos::sessions(&videos.positions, gap_minutes);
+        let sessions = crate::video::runs::sessions(&videos.positions, gap_minutes);
         let mapped_in_store = store.flow_in_store.iter().flat_map(|f| f.run_paths.iter().cloned()).collect();
-        let trust_default_offset = videos.setup == crate::videos::Setup::Aretha;
+        let trust_default_offset = videos.setup == crate::video::runs::Setup::Aretha;
         Self {
             videos,
             sessions,
@@ -244,7 +244,7 @@ impl Registration {
             }
         }
         let disabled = covers.iter().map(|c| self.layer.disabled.contains(&(rel.clone(), c.key))).collect();
-        let flow = crate::flow::read(&self.videos.root.join(&rel));
+        let flow = crate::video::flow::read(&self.videos.root.join(&rel));
         let m = Rc::new(RunMatch { snap, placed, covers, flow, assigned, disabled, nudge });
         self.matches.insert(rel, (key, m.clone()));
         Some(m)
@@ -299,7 +299,7 @@ impl Registration {
         let root = &self.videos.root;
         self.graphs
             .entry(r.rel_path.clone())
-            .or_insert_with(|| crate::videos::load_graph(root, r).ok().map(Rc::new))
+            .or_insert_with(|| crate::video::runs::load_graph(root, r).ok().map(Rc::new))
             .clone()
     }
 
@@ -353,7 +353,7 @@ impl Registration {
     }
 
     pub fn regroup(&mut self, gap_minutes: f32) {
-        self.sessions = crate::videos::sessions(&self.videos.positions, gap_minutes);
+        self.sessions = crate::video::runs::sessions(&self.videos.positions, gap_minutes);
         self.session = self.session.min(self.sessions.len().saturating_sub(1));
     }
 
@@ -612,7 +612,7 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
 }
 
 /// "24-25" for consecutive run numbers, else "3, 7"; `None` when no run has one.
-fn run_numbers(runs: &[crate::videos::Run]) -> Option<String> {
+fn run_numbers(runs: &[crate::video::runs::Run]) -> Option<String> {
     let nrs: Vec<i64> = runs.iter().filter_map(|r| r.run_nr).collect();
     let (&first, &last) = (nrs.first()?, nrs.last()?);
     Some(if nrs.len() > 1 && nrs.windows(2).all(|w| w[1] == w[0] + 1) {
@@ -672,7 +672,7 @@ pub fn right_panel(
             row(ui, "run nr", run.run_nr.map_or("—".into(), |n| n.to_string()));
             row(ui, "scale", format!("{:.3} µm/px", run.delta_x_um));
             if let Some(axis) = axis {
-                if let Some(f) = crate::videos::stg_frame(run.utc, &axis.timepoints) {
+                if let Some(f) = crate::video::runs::stg_frame(run.utc, &axis.timepoints) {
                     let offset_h = (axis.timepoints[f] - run.utc) as f64 / 3600.0;
                     row(ui, "STG frame", format!("{f} ({offset_h:+.1} h)"));
                     if unit != TimeUnit::Frame {
@@ -993,7 +993,7 @@ pub fn edges_section(ui: &mut egui::Ui, reg: &mut Registration, store: &Store, a
                     ui.label(egui::RichText::new(if d.dir == c.key { "u to v" } else { "v to u" }).strong());
                 }
                 ui.end_row();
-                for (k, name) in crate::flow::VALUE_NAMES.iter().enumerate() {
+                for (k, name) in crate::video::flow::VALUE_NAMES.iter().enumerate() {
                     ui.label(egui::RichText::new(*name).weak());
                     for d in dirs {
                         ui.monospace(format!("{:.3}", d.values[k]));
@@ -1172,7 +1172,7 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
                 if rows.is_empty() {
                     continue;
                 }
-                let frame = crate::videos::stg_frame(r.utc, &store.timepoints).map_or(r.utc, |f| store.timepoints[f]);
+                let frame = crate::video::runs::stg_frame(r.utc, &store.timepoints).map_or(r.utc, |f| store.timepoints[f]);
                 out.runs.push(FlowRunRow {
                     run_path: text(&r.rel_path),
                     mode: text(&r.mode),
@@ -1192,7 +1192,7 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
 mod tests {
     #[test]
     fn run_number_labels() {
-        let run = |nr| crate::videos::Run {
+        let run = |nr| crate::video::runs::Run {
             rel_path: String::new(),
             utc: 0,
             mode: String::new(),
