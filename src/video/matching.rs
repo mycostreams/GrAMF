@@ -63,6 +63,10 @@ pub struct EdgeCover {
     pub coverage: f32,
     /// Uncovered stretches (µm, placed), each at least `MIN_GAP_UM` long.
     pub gaps: Vec<Vec<[f32; 2]>>,
+    /// Per `chain` member, the stretch of its arc the video edge lies on: `[s_start, s_end]`
+    /// in µm along the arc's `/arcs_points` (for an added edge, from `a` to `b`); NaN when
+    /// unknown (a chain member assigned by hand that the matcher did not find).
+    pub spans: Vec<[f32; 2]>,
 }
 
 const STEP_UM: f32 = 2.0;
@@ -154,24 +158,33 @@ pub fn cover(store: &Store, added: &[AddedSegment], key: [i64; 3], points: &[[f3
 
     let grid = store.grid();
     let offsets = &store.arcs.offsets;
-    // per sample: the STG edge under it and whether the video runs along that edge's arc
-    let hits: Vec<Option<(EdgeRef, bool)>> = samples
+    let arc_s = store.arc_s();
+    // where `p` projects onto segment `a`-`b`, as a distance from `a`
+    let along_seg = |p: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        let seg = sub(b, a);
+        let l = len(seg);
+        if l == 0.0 { 0.0 } else { ((p[0] - a[0]) * seg[0] + (p[1] - a[1]) * seg[1]).clamp(0.0, l * l) / l }
+    };
+    // per sample: the STG edge under it, whether the video runs along that edge's arc, and
+    // where on the arc (µm from its first point)
+    let hits: Vec<Option<(EdgeRef, bool, f32)>> = samples
         .iter()
         .map(|&(p, t)| {
             let pipeline = grid.nearest(&store.arcs, p, threshold).map(|(d, v)| {
                 let e = offsets.partition_point(|&o| o <= v) - 1;
-                let seg = sub(store.arcs.points[v + 1], store.arcs.points[v]);
-                (d, EdgeRef::Pipeline(e), t[0] * seg[0] + t[1] * seg[1] >= 0.0)
+                let (a, b) = (store.arcs.points[v], store.arcs.points[v + 1]);
+                let seg = sub(b, a);
+                (d, EdgeRef::Pipeline(e), t[0] * seg[0] + t[1] * seg[1] >= 0.0, arc_s[v] + along_seg(p, a, b))
             });
             let extra = added
                 .iter()
                 .map(|a| {
                     let seg = sub(a.b, a.a);
-                    (segment_dist2(p, a.a, a.b).sqrt(), EdgeRef::Added(a.id), t[0] * seg[0] + t[1] * seg[1] >= 0.0)
+                    (segment_dist2(p, a.a, a.b).sqrt(), EdgeRef::Added(a.id), t[0] * seg[0] + t[1] * seg[1] >= 0.0, along_seg(p, a.a, a.b))
                 })
                 .filter(|x| x.0 <= threshold)
                 .min_by(|x, y| x.0.total_cmp(&y.0));
-            [pipeline, extra].into_iter().flatten().min_by(|x, y| x.0.total_cmp(&y.0)).map(|(_, e, along)| (e, along))
+            [pipeline, extra].into_iter().flatten().min_by(|x, y| x.0.total_cmp(&y.0)).map(|(_, e, along, s)| (e, along, s))
         })
         .collect();
 
@@ -179,7 +192,7 @@ pub fn cover(store: &Store, added: &[AddedSegment], key: [i64; 3], points: &[[f3
     let mut runs: Vec<(EdgeRef, usize, i32)> = vec![];
     let mut i = 0;
     while i < hits.len() {
-        let Some((e, _)) = hits[i] else {
+        let Some((e, _, _)) = hits[i] else {
             i += 1;
             continue;
         };
@@ -201,6 +214,13 @@ pub fn cover(store: &Store, added: &[AddedSegment], key: [i64; 3], points: &[[f3
             _ => chain.push((e, votes)),
         }
     }
+    // each chain member's stretch of arc: the range of its samples' arc positions
+    let spans = chain
+        .iter()
+        .map(|&(e, _)| {
+            hits.iter().flatten().filter(|h| h.0 == e).fold([f32::NAN; 2], |r, h| [r[0].min(h.2), r[1].max(h.2)])
+        })
+        .collect();
     let chain = chain
         .into_iter()
         .map(|(e, votes)| {
@@ -230,7 +250,7 @@ pub fn cover(store: &Store, added: &[AddedSegment], key: [i64; 3], points: &[[f3
         }
     }
     let covered = hits.iter().filter(|h| h.is_some()).count();
-    EdgeCover { key, chain, coverage: if hits.is_empty() { 0.0 } else { covered as f32 / hits.len() as f32 }, gaps }
+    EdgeCover { key, chain, coverage: if hits.is_empty() { 0.0 } else { covered as f32 / hits.len() as f32 }, gaps, spans }
 }
 
 #[cfg(test)]
@@ -264,12 +284,16 @@ mod tests {
         let pts = [[10.0, 2.0], [260.0, 2.0]];
         let c = cover(&s, &[], [0, 1, 0], &pts, 5.0);
         assert_eq!(c.chain, vec![(EdgeRef::Pipeline(0), 1), (EdgeRef::Pipeline(1), -1)]);
+        // where along each arc: edge 0 from x = 10 to its end; edge 1 (stored 100..200) whole
+        let near = |s: [f32; 2], want: [f32; 2]| (s[0] - want[0]).abs() < 2.5 && (s[1] - want[1]).abs() < 2.5;
+        assert!(near(c.spans[0], [10.0, 100.0]) && near(c.spans[1], [0.0, 100.0]), "spans {:?}", c.spans);
         assert_eq!(c.gaps.len(), 1);
         assert!((c.coverage - 0.76).abs() < 0.03, "coverage {}", c.coverage);
         // an added edge closes the gap
         let added = [AddedSegment { id: 1_000_000, a: [200.0, 0.0], b: [300.0, 0.0] }];
         let c = cover(&s, &added, [0, 1, 0], &pts, 5.0);
         assert_eq!(c.chain.last(), Some(&(EdgeRef::Added(1_000_000), 1)));
+        assert!(near(*c.spans.last().unwrap(), [0.0, 60.0]), "added span {:?}", c.spans.last());
         assert!(c.gaps.is_empty());
     }
 

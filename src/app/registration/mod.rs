@@ -255,6 +255,11 @@ impl Registration {
         let mut assigned = vec![false; covers.len()];
         for (c, a) in covers.iter_mut().zip(assigned.iter_mut()) {
             if let Some(chain) = self.layer.assignments.get(&(rel.clone(), c.key)) {
+                // keep the matcher's span where it found the same edge; unknown elsewhere
+                c.spans = chain
+                    .iter()
+                    .map(|(e, _)| c.chain.iter().position(|(f, _)| f == e).map_or([f32::NAN; 2], |i| c.spans[i]))
+                    .collect();
                 c.chain = chain.clone();
                 *a = true;
             }
@@ -425,7 +430,7 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
                 let mut rows = vec![];
                 for (c, disabled) in m.covers.iter().zip(&m.disabled) {
                     let Some(dirs) = flow.get(&c.key).filter(|_| !disabled) else { continue };
-                    for &(e, dir) in &c.chain {
+                    for (&(e, dir), span) in c.chain.iter().zip(&c.spans) {
                         let edge_id = match e {
                             EdgeRef::Pipeline(e) => e as i64,
                             EdgeRef::Added(id) => id,
@@ -449,6 +454,8 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
                                 coverage: v[4],
                                 pixel_count: v[5],
                                 flux: v[6],
+                                s_start_um: span[0] as f64,
+                                s_end_um: span[1] as f64,
                             });
                         }
                     }

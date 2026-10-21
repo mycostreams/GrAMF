@@ -256,7 +256,7 @@ fn read_file(path: &Path) -> hdf5_metno::Result<Annotations> {
         let attr_i = |n: &str| m.attr(n).and_then(|x| x.read_scalar::<i64>()).unwrap_or(0);
         a.flow = Some(FlowOutput {
             runs: runs.read_raw::<FlowRunRow>()?,
-            measurements: m.read_raw::<FlowMeasurementRow>()?,
+            measurements: read_measurements(&m)?,
             cutoff_um: m.attr("cutoff_um").and_then(|x| x.read_scalar::<f64>()).unwrap_or(f64::NAN) as f32,
             n_anchors: attr_i("n_anchors"),
             n_pins: attr_i("n_pins"),
@@ -277,4 +277,77 @@ fn read_file(path: &Path) -> hdf5_metno::Result<Annotations> {
         .map(|i| HistoryRow { utc: utc[i], author: authors[i].clone(), op: ops[i].clone() })
         .collect();
     Ok(a)
+}
+
+/// `/flow_measurements` as written before the along-arc span fields existed.
+#[derive(hdf5_metno::H5Type, Clone, Copy)]
+#[repr(C)]
+struct FlowMeasurementRowV1 {
+    edge_id: i64,
+    direction: i8,
+    run_index: i64,
+    src_u: i64,
+    src_v: i64,
+    src_k: i64,
+    median: f64,
+    perc_25: f64,
+    perc_75: f64,
+    flux_ratio: f64,
+    coverage: f64,
+    pixel_count: f64,
+    flux: f64,
+}
+
+/// Reads `/flow_measurements`; files from before `s_start_um` / `s_end_um` get NaN spans.
+fn read_measurements(m: &hdf5_metno::Dataset) -> hdf5_metno::Result<Vec<FlowMeasurementRow>> {
+    let has_spans = match m.dtype()?.to_descriptor()? {
+        hdf5_metno::types::TypeDescriptor::Compound(c) => c.fields.iter().any(|f| f.name == "s_start_um"),
+        _ => false,
+    };
+    if has_spans {
+        return m.read_raw::<FlowMeasurementRow>();
+    }
+    Ok(m.read_raw::<FlowMeasurementRowV1>()?
+        .into_iter()
+        .map(|r| FlowMeasurementRow {
+            edge_id: r.edge_id,
+            direction: r.direction,
+            run_index: r.run_index,
+            src_u: r.src_u,
+            src_v: r.src_v,
+            src_k: r.src_k,
+            median: r.median,
+            perc_25: r.perc_25,
+            perc_75: r.perc_75,
+            flux_ratio: r.flux_ratio,
+            coverage: r.coverage,
+            pixel_count: r.pixel_count,
+            flux: r.flux,
+            s_start_um: f64::NAN,
+            s_end_um: f64::NAN,
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_flow_tables_written_before_spans() {
+        let dir = std::env::temp_dir().join(format!("gramf-v1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.h5");
+        let f = hdf5_metno::File::create(&path).unwrap();
+        let row = FlowMeasurementRowV1 {
+            edge_id: 4, direction: 1, run_index: 0, src_u: 0, src_v: 1, src_k: 0,
+            median: 1.0, perc_25: 0.5, perc_75: 1.5, flux_ratio: 0.2, coverage: 1.0, pixel_count: 9.0, flux: 2.0,
+        };
+        let m = f.new_dataset_builder().with_data(&[row]).create("flow_measurements").unwrap();
+        let rows = read_measurements(&m).unwrap();
+        assert_eq!((rows[0].edge_id, rows[0].flux), (4, 2.0));
+        assert!(rows[0].s_start_um.is_nan() && rows[0].s_end_um.is_nan());
+        drop((m, f));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

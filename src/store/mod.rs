@@ -83,6 +83,8 @@ pub struct Store {
     pub flow_in_store: Option<FlowLayer>,
     /// Grid over arc segments for nearest-arc queries; built on first use.
     pub segment_grid: std::sync::OnceLock<SegmentGrid>,
+    /// Per arc vertex, its arc length (µm) from its arc's first point; built on first use.
+    pub arc_s: std::sync::OnceLock<Vec<f32>>,
     /// Arc ends more than [`DETACHED_END_UM`] from their node; built on first use.
     pub detached: std::sync::OnceLock<Vec<DetachedEnd>>,
 }
@@ -280,6 +282,7 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
         trails_in_store,
         flow_in_store,
         segment_grid: Default::default(),
+        arc_s: Default::default(),
         detached: Default::default(),
     })
 }

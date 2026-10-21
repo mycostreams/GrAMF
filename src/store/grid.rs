@@ -79,4 +79,19 @@ impl Store {
     pub fn grid(&self) -> &SegmentGrid {
         self.segment_grid.get_or_init(|| SegmentGrid::build(&self.arcs))
     }
+
+    /// Per arc vertex, its arc length (µm) from the first point of its arc, in `/arcs_points`
+    /// order: the axis `/arc_time_runs` measures `s_start_um` on.
+    pub fn arc_s(&self) -> &[f32] {
+        self.arc_s.get_or_init(|| {
+            let p = &self.arcs.points;
+            let mut s = vec![0.0; p.len()];
+            for w in self.arcs.offsets.windows(2) {
+                for v in w[0] + 1..w[1] {
+                    s[v] = s[v - 1] + (p[v][0] - p[v - 1][0]).hypot(p[v][1] - p[v - 1][1]);
+                }
+            }
+            s
+        })
+    }
 }
