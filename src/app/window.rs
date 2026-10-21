@@ -105,11 +105,26 @@ impl ApplicationHandler for App {
                     KeyEvent {
                         physical_key: winit::keyboard::PhysicalKey::Code(key_code),
                         state,
+                        repeat,
                         ..
                     },
                 ..
             } => match (key_code, state) {
                 (winit::keyboard::KeyCode::Escape, ElementState::Pressed) => escape = true,
+                // Space held: left-drag pans with any tool; a tap without a drag plays / pauses
+                (winit::keyboard::KeyCode::Space, ElementState::Pressed) => {
+                    if !repeat {
+                        (self.space_held, self.space_panned) = (true, false);
+                    }
+                }
+                (winit::keyboard::KeyCode::Space, ElementState::Released) => {
+                    self.space_held = false;
+                    if self.space_panned {
+                        self.dragging = false;
+                    } else if let Some(timeline) = self.timeline.as_mut() {
+                        timeline.toggle_play();
+                    }
+                }
                 (winit::keyboard::KeyCode::Home, ElementState::Pressed) => renderer.fit(),
                 // Video registration: left / right switch between the selected position's runs
                 (key @ (winit::keyboard::KeyCode::ArrowLeft | winit::keyboard::KeyCode::ArrowRight), ElementState::Pressed)
@@ -126,7 +141,6 @@ impl ApplicationHandler for App {
                         match key {
                             winit::keyboard::KeyCode::ArrowLeft => timeline.step(-1),
                             winit::keyboard::KeyCode::ArrowRight => timeline.step(1),
-                            winit::keyboard::KeyCode::Space => timeline.toggle_play(),
                             _ => (),
                         }
                     }
@@ -143,7 +157,11 @@ impl ApplicationHandler for App {
                 let nudging = registering && self.reg.as_ref().is_some_and(|r| r.tool == registration::RegTool::Nudge);
                 let cursor = [self.cursor.x as f32, self.cursor.y as f32];
                 let pressed = state == ElementState::Pressed;
-                if let (true, Some(reg), Some(store)) = (nudging, self.reg.as_mut(), self.store.as_ref()) {
+                if self.space_held {
+                    // the hand: pan, whatever the tool
+                    self.dragging = pressed;
+                    self.space_panned |= pressed;
+                } else if let (true, Some(reg), Some(store)) = (nudging, self.reg.as_mut(), self.store.as_ref()) {
                     // Nudge: a press inside a video frame selects that run and drags it; a press
                     // outside every frame does nothing.
                     if pressed {
@@ -198,13 +216,28 @@ impl ApplicationHandler for App {
                 }
                 self.cursor = position;
             }
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            // Adobe style: scroll pans (Shift: sideways), ⌥ or ⌘ (Ctrl) + scroll zooms at the
+            // cursor, and so does a trackpad pinch.
             WindowEvent::MouseWheel { delta, .. } => {
-                // ponytail: fixed zoom speeds, make them a preference if trackpads feel off
-                let factor = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => 1.15_f32.powf(-y),
-                    MouseScrollDelta::PixelDelta(p) => (-p.y as f32 * 0.003).exp(),
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x * LINE_PX, y * LINE_PX),
+                    MouseScrollDelta::PixelDelta(p) => (p.x as f32, p.y as f32),
                 };
-                renderer.zoom(factor, [self.cursor.x as f32, self.cursor.y as f32]);
+                let m = self.modifiers;
+                let command = if cfg!(target_os = "macos") { m.super_key() } else { m.control_key() };
+                if m.alt_key() || command {
+                    // ponytail: fixed zoom speed (a 40 px notch = 1.15x), a preference if it feels off
+                    let d = if dy != 0.0 { dy } else { dx };
+                    renderer.zoom((-d * 0.0035).exp(), [self.cursor.x as f32, self.cursor.y as f32]);
+                } else if m.shift_key() && dx == 0.0 {
+                    renderer.pan(dy, 0.0);
+                } else {
+                    renderer.pan(dx, dy);
+                }
+            }
+            WindowEvent::PinchGesture { delta, .. } => {
+                renderer.zoom((-delta as f32).exp(), [self.cursor.x as f32, self.cursor.y as f32]);
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 let scale_factor = window.scale_factor() as f32;

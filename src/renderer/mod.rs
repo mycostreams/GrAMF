@@ -138,6 +138,22 @@ impl AppRenderer {
         self.graph_renderer.camera.pan(dx, dy, self.map_rect[3]);
     }
 
+    /// Zooms around `cursor` (window pixels) when it is over the map, else around the map's
+    /// centre: for keyboard zoom.
+    pub fn zoom_keyboard(&mut self, factor: f32, cursor: [f32; 2]) {
+        let [x, y, w, h] = self.map_rect;
+        let over = cursor[0] >= x && cursor[0] <= x + w && cursor[1] >= y && cursor[1] <= y + h;
+        self.zoom(factor, if over { cursor } else { [x + w / 2.0, y + h / 2.0] });
+    }
+
+    /// Fits the view to the world box `min`..`max` with a margin, at least 200 µm across.
+    pub fn fit_to(&mut self, min: [f32; 2], max: [f32; 2]) {
+        let pad = |lo: f32, hi: f32| ((hi - lo) * 0.1).max((200.0 - (hi - lo)) / 2.0).max(0.0);
+        let (px, py) = (pad(min[0], max[0]), pad(min[1], max[1]));
+        let aspect = self.map_aspect();
+        self.graph_renderer.camera.fit([min[0] - px, min[1] - py], [max[0] + px, max[1] + py], aspect);
+    }
+
     /// `cursor` is in window pixels.
     pub fn zoom(&mut self, factor: f32, cursor: [f32; 2]) {
         let [x, y, w, h] = self.map_rect;

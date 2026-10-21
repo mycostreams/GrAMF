@@ -16,6 +16,28 @@ fn pick_added(store: &Store, st: &AnnotationState, at: [f32; 2], radius: f32) ->
 }
 
 impl App {
+    /// World bounds of what is selected: the selected video frame in Video registration, else
+    /// the selected edge, node, hyperedge, added edge or box selection.
+    pub(super) fn selection_bounds(&mut self) -> Option<([f32; 2], [f32; 2])> {
+        let store = self.store.as_ref()?;
+        let added = added_segments(store, self.annot.as_ref());
+        let mut pts: Vec<[f32; 2]> = vec![];
+        if self.workflow == registration::Workflow::Registration {
+            pts.extend(self.reg.as_mut()?.selected_frame(store, &added)?);
+        } else {
+            let arc = |e: usize| &store.arcs.points[store.arcs.offsets[e]..store.arcs.offsets[e + 1]];
+            match self.selection.as_ref()? {
+                ui::Selection::Edge(e) => pts.extend(arc(*e)),
+                ui::Selection::Node(n) => pts.push(store.node_pos[*n]),
+                ui::Selection::Hyperedge(h) => store.hyperedge_edges(*h).into_iter().for_each(|e| pts.extend(arc(e))),
+                ui::Selection::Added(id) => added.iter().filter(|a| a.id == *id).for_each(|a| pts.extend([a.a, a.b])),
+                ui::Selection::Box => self.boxed.iter().for_each(|&e| pts.extend(arc(e))),
+            }
+        }
+        let first = *pts.first()?;
+        Some(pts.iter().fold((first, first), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])))
+    }
+
     pub(super) fn select(&mut self, selection: Option<ui::Selection>) {
         let (Some(renderer), Some(store)) = (self.renderer.as_mut(), self.store.as_ref()) else {
             return;

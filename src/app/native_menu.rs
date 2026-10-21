@@ -11,6 +11,9 @@ pub enum Command {
     Undo,
     Redo,
     ResetCamera,
+    ZoomIn,
+    ZoomOut,
+    ZoomSelection,
     Developer,
     Settings,
     Quit,
@@ -77,7 +80,14 @@ impl NativeMenu {
         let view = Submenu::with_items(
             "View",
             true,
-            &[&MenuItem::with_id("reset_camera", "Reset Camera", true, None), &sep(), &developer],
+            &[
+                &item("zoom_in", "Zoom In", "CmdOrCtrl+Equal"),
+                &item("zoom_out", "Zoom Out", "CmdOrCtrl+Minus"),
+                &item("reset_camera", "Reset Camera", "CmdOrCtrl+0"),
+                &item("zoom_selection", "Zoom to Selection", "CmdOrCtrl+2"),
+                &sep(),
+                &developer,
+            ],
         )
         .ok()?;
         let window = Submenu::with_items(
@@ -104,6 +114,9 @@ impl NativeMenu {
                 "undo" => Some(Command::Undo),
                 "redo" => Some(Command::Redo),
                 "reset_camera" => Some(Command::ResetCamera),
+                "zoom_in" => Some(Command::ZoomIn),
+                "zoom_out" => Some(Command::ZoomOut),
+                "zoom_selection" => Some(Command::ZoomSelection),
                 "developer" => Some(Command::Developer),
                 "settings" => Some(Command::Settings),
                 "quit" => Some(Command::Quit),

@@ -35,6 +35,13 @@ fn inside(c: &[[f32; 2]; 5], q: [f32; 2]) -> bool {
 }
 
 impl Registration {
+    /// The selected run's frame outline in µm, when its session is placed.
+    pub fn selected_frame(&mut self, store: &Store, added: &[AddedSegment]) -> Option<[[f32; 2]; 5]> {
+        let (p, run) = (self.position?, self.run);
+        let sim = self.fits().get(self.session)?.as_ref()?.sim;
+        frame_world(self, p, run, &sim, store, added).map(|(_, c)| c)
+    }
+
     /// The video frame under world point `at` among those drawn (each position's shown run,
     /// and the selected position's other runs): the selected run when it is one of them, else
     /// the highest run number. `(position, run)`.

@@ -211,6 +211,9 @@ Only implemented workflows get a button; v1 ships with one, so the switcher appe
 - View > Developer adds a bottom dock: store inspector, health checks, raw rows, timings.
 - Box select (B): drag a box to select edges (scope for export).
 - Right-drag always pans, whatever the tool or workflow; left-drag belongs to the tool (and pans only with Select).
+- Navigation follows Adobe: scroll pans (Shift: sideways), Space + drag pans with any tool (a Space tap plays),
+  ⌥ or ⌘ + scroll and pinch zoom at the cursor; ⌘= / ⌘− / ⌘0 / ⌘2 zoom in, out, fit, to the selection
+  (the selected video frame in Video registration).
 - Node tools (Root, Add edge) draw nodes, ring the one under the cursor (10 px snap) and, while
   adding an edge, show a rubber band from the first node.
 - Lines are screen-space quads: thickness in px, optionally following each edge's width at the
