@@ -380,8 +380,7 @@ pub fn toolbar(ui: &mut egui::Ui, reg: &mut Registration) -> bool {
         (RegTool::Assign, _) if reg.video_edge.is_none() => "select a video edge first (right panel or Select tool)",
         (RegTool::Assign, _) => "click STG edges to add them to the selected video edge's chain, or remove them",
         (RegTool::Disable, _) => "click a video edge to mark it as an artifact (no flow), or unmark it",
-        (RegTool::Nudge, None) => "select a position first",
-        (RegTool::Nudge, Some(_)) => "drag to move this run's video graph; the snap refines from where you leave it",
+        (RegTool::Nudge, _) => "click a video frame to select its run, drag it to move it (the snap refines from where you leave it); the left / right arrow keys switch runs",
     };
     ui.label(egui::RichText::new(hint).weak());
     publish

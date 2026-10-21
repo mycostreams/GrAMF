@@ -209,7 +209,8 @@ Only implemented workflows get a button; v1 ships with one, so the switcher appe
   edited (always the user's own), checkbox = visible.
 - Node and hyperedge ids are always available (layer toggles + inspector), not dev-only.
 - View > Developer adds a bottom dock: store inspector, health checks, raw rows, timings.
-- Box select (B): drag a box to select edges (scope for export); right-drag pans with any tool.
+- Box select (B): drag a box to select edges (scope for export).
+- Right-drag always pans, whatever the tool or workflow; left-drag belongs to the tool (and pans only with Select).
 - Node tools (Root, Add edge) draw nodes, ring the one under the cursor (10 px snap) and, while
   adding an edge, show a rubber band from the first node.
 - Lines are screen-space quads: thickness in px, optionally following each edge's width at the

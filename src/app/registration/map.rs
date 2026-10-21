@@ -5,20 +5,59 @@ use super::*;
 /// Map text: position, text, colour.
 pub type MapText = (Pos2, String, Color32);
 
-/// A run's matched graph and its frame outline in points: the same chain as the video edges
-/// (place, nudge, snap).
-fn run_frame(reg: &mut Registration, p: usize, run: usize, sim: &Similarity, store: &Store, added: &[AddedSegment], to_pt: &impl Fn([f32; 2]) -> Pos2) -> Option<(Rc<RunMatch>, Vec<Pos2>)> {
+/// A run's matched graph and its frame outline in µm, closed (5 corners): the same chain as
+/// the video edges (place, nudge, snap).
+fn frame_world(reg: &mut Registration, p: usize, run: usize, sim: &Similarity, store: &Store, added: &[AddedSegment]) -> Option<(Rc<RunMatch>, [[f32; 2]; 5])> {
     let m = reg.run_match(p, run, sim, store, added)?;
     let pos = &reg.videos.positions[p];
     let (stage, frame, dx) = (pos.stage_mm, pos.runs[run].frame_size, pos.runs[run].delta_x_um);
     let (camera, rigid) = (reg.camera(), m.snap.unwrap_or_default());
     let place = |q: [f32; 2]| {
         let w = placement::place(sim, camera, stage, q);
-        to_pt(rigid.apply([w[0] + m.nudge[0], w[1] + m.nudge[1]]))
+        rigid.apply([w[0] + m.nudge[0], w[1] + m.nudge[1]])
     };
     let (hw, hh) = (frame[1] as f32 * dx / 2.0, frame[0] as f32 * dx / 2.0);
-    let corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh], [-hw, -hh]].into_iter().map(place).collect();
+    let corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh], [-hw, -hh]].map(place);
     Some((m, corners))
+}
+
+/// [`frame_world`] in points.
+fn run_frame(reg: &mut Registration, p: usize, run: usize, sim: &Similarity, store: &Store, added: &[AddedSegment], to_pt: &impl Fn([f32; 2]) -> Pos2) -> Option<(Rc<RunMatch>, Vec<Pos2>)> {
+    let (m, corners) = frame_world(reg, p, run, sim, store, added)?;
+    Some((m, corners.iter().map(|&q| to_pt(q)).collect()))
+}
+
+/// True when `q` lies inside the closed convex outline `c` (either winding).
+fn inside(c: &[[f32; 2]; 5], q: [f32; 2]) -> bool {
+    let side = |a: [f32; 2], b: [f32; 2]| (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
+    let s: Vec<f32> = c.windows(2).map(|w| side(w[0], w[1])).collect();
+    s.iter().all(|&x| x >= 0.0) || s.iter().all(|&x| x <= 0.0)
+}
+
+impl Registration {
+    /// The video frame under world point `at` among those drawn (each position's shown run,
+    /// and the selected position's other runs): the selected run when it is one of them, else
+    /// the highest run number. `(position, run)`.
+    pub fn frame_at(&mut self, at: [f32; 2], store: &Store, added: &[AddedSegment]) -> Option<(usize, usize)> {
+        let sim = self.fits().get(self.session)?.as_ref()?.sim;
+        let mut hits = vec![];
+        for p in self.sessions[self.session].positions.clone() {
+            let runs: Vec<usize> = if self.position == Some(p) {
+                (0..self.videos.positions[p].runs.len()).collect()
+            } else {
+                vec![self.shown_run(p)]
+            };
+            for run in runs {
+                if frame_world(self, p, run, &sim, store, added).is_some_and(|(_, c)| inside(&c, at)) {
+                    hits.push((p, run));
+                }
+            }
+        }
+        if let Some(&hit) = hits.iter().find(|&&(p, run)| self.position == Some(p) && self.run == run) {
+            return Some(hit);
+        }
+        hits.into_iter().max_by_key(|&(p, run)| self.videos.positions[p].runs[run].run_nr.unwrap_or(i64::MIN))
+    }
 }
 
 /// "50 · 1/2": the run number and which of the position's runs this is.
@@ -212,4 +251,16 @@ pub fn toggle_in_chain(reg: &mut Registration, store: &Store, added: &[AddedSegm
     let at = chain.iter().position(|(e, _)| along(mid_of(e)) > k).unwrap_or(chain.len());
     chain.insert(at, (edge, dir));
     Some(Op::SetAssignment((rel, key), Some(chain)))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn inside_a_rotated_frame() {
+        let c = [[0.0, -10.0], [10.0, 0.0], [0.0, 10.0], [-10.0, 0.0], [0.0, -10.0]];
+        assert!(super::inside(&c, [0.0, 0.0]) && super::inside(&c, [4.0, 4.0]));
+        assert!(!super::inside(&c, [8.0, 8.0]));
+        let reversed = [c[4], c[3], c[2], c[1], c[0]];
+        assert!(super::inside(&reversed, [1.0, -2.0]));
+    }
 }
