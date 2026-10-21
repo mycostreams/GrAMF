@@ -362,7 +362,10 @@ consumers that do not read annotation files yet. It is the one place GrAMF write
 is removed once STHype's `read_flow_mappings` accepts an annotation file and transport_paper
 names the file it uses. As built (R6): a toolbar button in Video registration; it saves first, asks with a
 native dialog, refuses a store whose `backbone_fingerprint` differs from the annotations',
-and writes a copy (`stg_store.h5.publishing`) renamed over the store only when complete.
+and writes a copy (`stg_store.h5.publishing`) renamed over the store only when complete; the
+store as it was is kept beside it as `stg_store.h5.bak-before-gramf-publish-<date-time>`. Before
+asking, it names any trails or roots in the store that the annotations lack (they would be
+dropped) and offers to import them first; the confirm dialog names the flow layer it replaces.
 Measurements on added edges have no store `edge_id`, so they stay in the annotation file
 (the status line counts them). STHype's `read_flow_mappings` and `read_root_nodes` read
 the result.
