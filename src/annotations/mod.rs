@@ -99,6 +99,11 @@ pub struct FlowMeasurementRow {
     pub coverage: f64,
     pub pixel_count: f64,
     pub flux: f64,
+    /// The stretch of the STG edge's arc the video edge lies on, in µm along `/arcs_points`
+    /// of that edge (the `/arc_time_runs` axis); NaN when unknown. Additive to STHype's
+    /// FLOW_SCHEMA_VERSION 1 fields.
+    pub s_start_um: f64,
+    pub s_end_um: f64,
 }
 
 /// One reversible change.
@@ -382,6 +387,7 @@ mod tests {
         let m = |edge_id| FlowMeasurementRow {
             edge_id, direction: 1, run_index: 0, src_u: 0, src_v: 1, src_k: 0,
             median: 1.0, perc_25: 0.5, perc_75: 1.5, flux_ratio: f64::NAN, coverage: 1.0, pixel_count: 9.0, flux: 2.0,
+            s_start_um: 3.0, s_end_um: 40.0,
         };
         let run = FlowRunRow { run_path: vlu("pos/run"), mode: vlu("brightfield"), run_nr: -1, video_epoch_s: 1.0, frame_timestamp: 2.0 };
         a.flow = Some(FlowOutput { runs: vec![run], measurements: vec![m(4), m(ADDED_EDGE_ID_START)], cutoff_um: 8.0, n_anchors: 2, n_pins: 0 });
@@ -447,6 +453,7 @@ mod tests {
             measurements: vec![FlowMeasurementRow {
                 edge_id: 23158, direction: -1, run_index: 0, src_u: 1, src_v: 6, src_k: 0,
                 median: 1.5, perc_25: 0.5, perc_75: 3.0, flux_ratio: 0.5, coverage: 0.4, pixel_count: 100.0, flux: 150.0,
+                s_start_um: 12.5, s_end_um: 140.0,
             }],
             cutoff_um: 12.5,
             n_anchors: 1,
@@ -471,6 +478,7 @@ mod tests {
         assert_eq!(b.registration, a.registration);
         let flow = b.flow.as_ref().unwrap();
         assert_eq!((flow.runs.len(), flow.measurements[0].edge_id, flow.measurements[0].direction), (1, 23158, -1));
+        assert_eq!((flow.measurements[0].s_start_um, flow.measurements[0].s_end_um), (12.5, 140.0));
         assert_eq!(b.history.len(), 13);
         assert!(!b.dirty);
     }
