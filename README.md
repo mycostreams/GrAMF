@@ -87,14 +87,20 @@ requests run the same build and tests without releasing.
 
 ```
 src/
-  main.rs, lib.rs   entry point
-  store.rs          read-only stg_store.h5 loader, picking
-  annotations.rs    annotations.<author>.h5 model, undo, atomic save
-  export.rs         CSV / GeoJSON / README export
-  devtools.rs       dataset listing, health checks, raw rows, matcher evidence
-  registry.rs       plate lookup in the AMF-PlateList xlsx files
-  time.rs           time axis and units      colour.rs  colour-by modes
-  update.rs         newer-release check
-  app/              winit/egui app: ui, annotate, export_dialog, dev_panel
-  renderer/         wgpu setup, line-strip graph renderer, 2D camera
+  main.rs, lib.rs     entry point
+  store/              read-only stg_store.h5 loader, picking; grid (nearest arc), width,
+                      route (trails), detached (arc ends far from their node)
+  annotations/        annotations.<author>.h5 model and undo; file (atomic save, load),
+                      publish (Publish to store)
+  video/              flow videos: runs (folders, sessions), placement, matching, flow
+  export.rs           CSV / GeoJSON / README export
+  devtools.rs         dataset listing, health checks, raw rows, matcher evidence
+  registry.rs         plate lookup in the AMF-PlateList xlsx files
+  settings.rs         ~/.gramf/settings      time.rs  time axis    colour.rs  colour-by
+  update.rs           newer-release check
+  app/                winit/egui app: actions (files), picking, overlays, window (event loop),
+                      annotate, export_dialog, dev_panel, settings_window, native_menu
+    ui/               panels: timeline, inspector, legend
+    registration/     Video registration workspace: panels, map
+  renderer/           wgpu setup, segment renderer and its vertex layout, 2D camera
 ```

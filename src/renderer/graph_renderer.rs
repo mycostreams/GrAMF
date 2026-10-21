@@ -1,4 +1,4 @@
-use crate::{renderer::camera::Camera, store::Arcs, vertex::SegmentInstance};
+use crate::{renderer::camera::Camera, renderer::vertex::SegmentInstance, store::Arcs};
 use wgpu::util::DeviceExt;
 
 /// How edges are drawn; set from the Layers panel.
