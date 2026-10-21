@@ -1,6 +1,7 @@
 mod graph_renderer;
 mod camera;
 mod gpu;
+mod vertex;
 use crate::renderer::gpu::Gpu;
 use egui_wgpu::{Renderer as EguiRenderer, ScreenDescriptor, wgpu};
 use web_time::Duration;

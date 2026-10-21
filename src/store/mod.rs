@@ -4,6 +4,17 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+mod detached;
+mod grid;
+mod route;
+mod width;
+
+pub use detached::{DETACHED_END_UM, DetachedEnd};
+pub use grid::{SegmentGrid, segment_dist2};
+use grid::{dist2, nearest};
+pub use width::{WidthSegment, WidthTimestep, read_width_segments, read_width_timesteps};
+use width::{mean_widths, width_table};
+
 #[derive(Default)]
 /// Edge polylines in µm, from `/arcs_points` + `/arcs_offsets` (N+1 CSR):
 /// edge `i` is `points[offsets[i]..offsets[i + 1]]`. `x` is the image column, `y` the row.
@@ -76,69 +87,6 @@ pub struct Store {
     pub detached: std::sync::OnceLock<Vec<DetachedEnd>>,
 }
 
-/// An arc end this far from its node is drawn with a gap, the node floating beside it.
-pub const DETACHED_END_UM: f32 = 15.0;
-
-/// An arc end that stops short of (or overshoots) the node `/edges` gives it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DetachedEnd {
-    pub edge: usize,
-    /// Index into `arcs.points` of the arc end.
-    pub point: usize,
-    /// Node row.
-    pub node: usize,
-    pub gap_um: f32,
-}
-
-/// Arc segments bucketed in square cells, for "nearest STG arc within r" queries.
-pub struct SegmentGrid {
-    cell: f32,
-    /// Cell -> first vertex of each segment (`v`, `v + 1`) touching it.
-    cells: HashMap<(i32, i32), Vec<u32>>,
-}
-
-impl SegmentGrid {
-    const CELL_UM: f32 = 50.0;
-
-    fn build(arcs: &Arcs) -> Self {
-        let cell = Self::CELL_UM;
-        let mut cells: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
-        for e in arcs.offsets.windows(2) {
-            for v in e[0]..e[1].saturating_sub(1) {
-                let (a, b) = (arcs.points[v], arcs.points[v + 1]);
-                let lo = ((a[0].min(b[0]) / cell).floor() as i32, (a[1].min(b[1]) / cell).floor() as i32);
-                let hi = ((a[0].max(b[0]) / cell).floor() as i32, (a[1].max(b[1]) / cell).floor() as i32);
-                for x in lo.0..=hi.0 {
-                    for y in lo.1..=hi.1 {
-                        cells.entry((x, y)).or_default().push(v as u32);
-                    }
-                }
-            }
-        }
-        Self { cell, cells }
-    }
-
-    /// Distance from `p` to the nearest arc segment, if one lies within `max` µm, and that
-    /// segment's first vertex.
-    pub fn nearest(&self, arcs: &Arcs, p: [f32; 2], max: f32) -> Option<(f32, usize)> {
-        let r = (max / self.cell).ceil() as i32;
-        let (cx, cy) = ((p[0] / self.cell).floor() as i32, (p[1] / self.cell).floor() as i32);
-        let mut best: Option<(f32, usize)> = None;
-        for x in cx - r..=cx + r {
-            for y in cy - r..=cy + r {
-                for &v in self.cells.get(&(x, y)).into_iter().flatten() {
-                    let v = v as usize;
-                    let d = segment_dist2(p, arcs.points[v], arcs.points[v + 1]).sqrt();
-                    if d <= max && best.is_none_or(|(bd, _)| d < bd) {
-                        best = Some((d, v));
-                    }
-                }
-            }
-        }
-        best
-    }
-}
-
 pub struct FlowLayer {
     /// `/flow_runs/run_path`: `<position>/<timestamp>` relative to `polyflow_analysis`.
     pub run_paths: Vec<String>,
@@ -151,42 +99,6 @@ pub struct FlowLayer {
 #[repr(C)]
 struct FlowRunRow {
     run_path: hdf5_metno::types::VarLenUnicode,
-}
-
-/// The `/edge_width_segments` columns GrAMF uses (HDF5 converts compound members by name).
-#[derive(hdf5_metno::H5Type, Clone, Copy)]
-#[repr(C)]
-pub struct WidthSegment {
-    pub edge_id: i64,
-    pub s_start_um: f64,
-    pub s_end_um: f64,
-    pub width_um: f64,
-    pub width_se_um: f64,
-}
-
-pub fn read_width_segments(path: &Path) -> Result<Vec<WidthSegment>, String> {
-    let file = hdf5_metno::File::open(path).map_err(|e| e.to_string())?;
-    file.dataset("edge_width_segments")
-        .and_then(|d| d.read_raw::<WidthSegment>())
-        .map_err(|e| format!("/edge_width_segments: {e}"))
-}
-
-/// One `/edge_width_timesteps` row (schema v2): both width estimators per (edge, frame).
-#[derive(hdf5_metno::H5Type, Clone, Copy)]
-#[repr(C)]
-pub struct WidthTimestep {
-    pub edge_id: i64,
-    pub timepoint_index: i64,
-    pub width_um: f64,
-    pub width_seg_um: f64,
-}
-
-/// Read on demand (exports only): ~0.6M rows on a large plate.
-pub fn read_width_timesteps(path: &Path) -> Result<Vec<WidthTimestep>, String> {
-    let file = hdf5_metno::File::open(path).map_err(|e| e.to_string())?;
-    file.dataset("edge_width_timesteps")
-        .and_then(|d| d.read_raw::<WidthTimestep>())
-        .map_err(|e| format!("/edge_width_timesteps: {e}"))
 }
 
 pub fn read_store(path: &Path) -> Result<Store, String> {
@@ -372,36 +284,6 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
     })
 }
 
-/// Builds [`Store::width_t`] and its quantiles; see there.
-fn width_table(rows: &[WidthTimestep], n_frames: usize, n_edges: usize) -> (Vec<f32>, Option<[f32; 3]>) {
-    if n_frames == 0 {
-        return (vec![], None);
-    }
-    let valid = |w: f64| (w.is_finite() && w > 0.0).then_some(w as f32);
-    let mut table = vec![f32::NAN; n_frames * n_edges];
-    let mut measured = vec![];
-    for r in rows {
-        let (Ok(t), Ok(e)) = (usize::try_from(r.timepoint_index), usize::try_from(r.edge_id)) else {
-            continue;
-        };
-        if let (true, Some(w)) = (t < n_frames && e < n_edges, valid(r.width_seg_um).or(valid(r.width_um))) {
-            table[t * n_edges + e] = w;
-            measured.push(w);
-        }
-    }
-    for t in 1..n_frames {
-        for e in 0..n_edges {
-            if table[t * n_edges + e].is_nan() {
-                table[t * n_edges + e] = table[(t - 1) * n_edges + e];
-            }
-        }
-    }
-    measured.sort_by(f32::total_cmp);
-    let q = |p: f32| measured[((measured.len() - 1) as f32 * p).round() as usize];
-    let quantiles = (!measured.is_empty()).then(|| [q(0.05), q(0.5), q(0.95)]);
-    (table, quantiles)
-}
-
 fn polyline_lengths(arcs: &Arcs) -> Vec<f32> {
     arcs.offsets
         .windows(2)
@@ -414,39 +296,9 @@ fn polyline_lengths(arcs: &Arcs) -> Vec<f32> {
         .collect()
 }
 
-/// Length-weighted mean width and standard error per edge; NaN widths are skipped.
-fn mean_widths(n_edges: usize, segments: &[WidthSegment]) -> Result<Vec<Option<(f32, f32)>>, String> {
-    let mut sums = vec![(0.0_f64, 0.0_f64, 0.0_f64); n_edges];
-    for seg in segments {
-        let sum = usize::try_from(seg.edge_id)
-            .ok()
-            .and_then(|e| sums.get_mut(e))
-            .ok_or("/edge_width_segments names an edge out of range")?;
-        let len = (seg.s_end_um - seg.s_start_um).max(0.0);
-        if seg.width_um.is_finite() && len > 0.0 {
-            *sum = (sum.0 + len * seg.width_um, sum.1 + len * seg.width_se_um, sum.2 + len);
-        }
-    }
-    Ok(sums
-        .into_iter()
-        .map(|(w, se, len)| (len > 0.0).then(|| ((w / len) as f32, (se / len) as f32)))
-        .collect())
-}
-
 impl Store {
     pub fn n_edges(&self) -> usize {
         self.arcs.n_edges()
-    }
-
-    /// Width of edge `e` at timepoint `t` (per-timestep table), else its pooled width.
-    pub fn width_at(&self, e: usize, t: Option<usize>) -> Option<f32> {
-        match t.filter(|_| !self.width_t.is_empty()) {
-            Some(t) => {
-                let t = t.min(self.timepoints.len() - 1);
-                Some(self.width_t[t * self.n_edges() + e]).filter(|w| w.is_finite())
-            }
-            None => self.width[e].map(|w| w.0),
-        }
     }
 
     /// Edges incident to node row `node`.
@@ -467,77 +319,6 @@ impl Store {
             (p[0] - first[0]).hypot(p[1] - first[1])
         });
         d(&n2) < d(&n1)
-    }
-
-    /// Arc ends far from their node, largest gap first.
-    pub fn detached_ends(&self) -> &[DetachedEnd] {
-        self.detached.get_or_init(|| {
-            let mut out = vec![];
-            for e in 0..self.n_edges() {
-                let (a, b) = (self.arcs.offsets[e], self.arcs.offsets[e + 1]);
-                if a == b {
-                    continue;
-                }
-                let [u, v] = self.edge_nodes[e];
-                let (pu, pv) = if self.arc_reversed(e) { (b - 1, a) } else { (a, b - 1) };
-                for (id, point) in [(u, pu), (v, pv)] {
-                    let Some(&node) = self.node_index.get(&id) else {
-                        continue; // reported by the "missing from /nodes" check
-                    };
-                    let (p, q) = (self.arcs.points[point], self.node_pos[node]);
-                    let gap_um = (p[0] - q[0]).hypot(p[1] - q[1]);
-                    if gap_um > DETACHED_END_UM {
-                        out.push(DetachedEnd { edge: e, point, node, gap_um });
-                    }
-                }
-            }
-            out.sort_by(|a, b| b.gap_um.total_cmp(&a.gap_um));
-            out
-        })
-    }
-
-    pub fn grid(&self) -> &SegmentGrid {
-        self.segment_grid.get_or_init(|| SegmentGrid::build(&self.arcs))
-    }
-
-    /// Shortest path (by arc length) through every waypoint in turn, over the STG plus
-    /// `extra` edges (`(u, v, length_um)`, e.g. added edges), as node ids. `None` when some
-    /// leg has no path.
-    pub fn route(&self, waypoints: &[i64], extra: &[(i64, i64, f32)]) -> Option<Vec<i64>> {
-        let mut adjacency: HashMap<i64, Vec<(i64, f32)>> = HashMap::new();
-        let edges = self.edge_nodes.iter().enumerate().map(|(e, &[u, v])| (u, v, self.edge_length_um[e]));
-        for (u, v, len) in edges.chain(extra.iter().copied()) {
-            adjacency.entry(u).or_default().push((v, len));
-            adjacency.entry(v).or_default().push((u, len));
-        }
-        let mut path = vec![*waypoints.first()?];
-        for leg in waypoints.windows(2) {
-            let piece = dijkstra(&adjacency, leg[0], leg[1])?;
-            path.extend(&piece[1..]);
-        }
-        Some(path)
-    }
-
-    /// Geometry of a node path: each step follows its edge's arc (straight when the step is
-    /// an added edge or unknown).
-    pub fn path_polyline(&self, nodes: &[i64]) -> Vec<[f32; 2]> {
-        let pos = |id: &i64| self.node_index.get(id).map(|&n| self.node_pos[n]);
-        let mut out: Vec<[f32; 2]> = nodes.first().and_then(pos).into_iter().collect();
-        for step in nodes.windows(2) {
-            let (a, b) = (step[0], step[1]);
-            match self.edge_by_nodes.get(&(a.min(b), a.max(b))) {
-                Some(&e) => {
-                    let arc = &self.arcs.points[self.arcs.offsets[e]..self.arcs.offsets[e + 1]];
-                    if self.edge_nodes[e][0] == a {
-                        out.extend(arc.iter().skip(1));
-                    } else {
-                        out.extend(arc.iter().rev().skip(1));
-                    }
-                }
-                None => out.extend(pos(&b)),
-            }
-        }
-        out
     }
 
     /// Edges of hyperedge `h`.
@@ -571,63 +352,6 @@ impl Store {
             radius,
         )
     }
-}
-
-/// Dijkstra between two node ids; the path as node ids, `None` if unreachable.
-fn dijkstra(adjacency: &HashMap<i64, Vec<(i64, f32)>>, from: i64, to: i64) -> Option<Vec<i64>> {
-    use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    // Non-negative f32 compare like their bit patterns, so they can key the heap.
-    let key = |d: f32| Reverse(d.to_bits());
-    let mut dist: HashMap<i64, f32> = HashMap::from([(from, 0.0)]);
-    let mut prev: HashMap<i64, i64> = HashMap::new();
-    let mut heap = BinaryHeap::from([(key(0.0), from)]);
-    while let Some((Reverse(bits), node)) = heap.pop() {
-        let d = f32::from_bits(bits);
-        if node == to {
-            let mut path = vec![to];
-            while let Some(&p) = prev.get(path.last()?) {
-                path.push(p);
-            }
-            path.reverse();
-            return Some(path);
-        }
-        if d > dist[&node] {
-            continue;
-        }
-        for &(next, len) in adjacency.get(&node).into_iter().flatten() {
-            let nd = d + len.max(0.0);
-            if dist.get(&next).is_none_or(|&old| nd < old) {
-                dist.insert(next, nd);
-                prev.insert(next, node);
-                heap.push((key(nd), next));
-            }
-        }
-    }
-    None
-}
-
-fn nearest(items: impl Iterator<Item = usize>, d2: impl Fn(usize) -> f32, radius: f32) -> Option<usize> {
-    items
-        .map(|i| (i, d2(i)))
-        .filter(|&(_, d)| d <= radius * radius)
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(i, _)| i)
-}
-
-fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
-    (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
-}
-
-pub fn segment_dist2(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
-    let ab = [b[0] - a[0], b[1] - a[1]];
-    let len2 = ab[0] * ab[0] + ab[1] * ab[1];
-    let s = if len2 > 0.0 {
-        (((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / len2).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    dist2(p, [a[0] + s * ab[0], a[1] + s * ab[1]])
 }
 
 /// `/arc_time_runs` rows are `(edge_id, s_start_um, t_index)`, sorted by edge then `s`;
@@ -700,7 +424,8 @@ fn arcs_from_raw(offsets: &[i64], flat_points: &[f64]) -> Result<Arcs, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dijkstra, WidthSegment, WidthTimestep, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs, width_table};
+    use super::route::dijkstra;
+    use super::{WidthSegment, WidthTimestep, arcs_from_raw, mean_widths, segment_dist2, vertex_t_from_runs, width_table};
 
     #[test]
     fn grid_finds_the_nearest_segment() {
