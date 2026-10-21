@@ -231,8 +231,13 @@ impl ApplicationHandler for App {
                 let registering = self.workflow == registration::Workflow::Registration;
                 let added_segments =
                     self.store.as_ref().map_or_else(Vec::new, |s| added_segments(s, self.annot.as_ref()));
+                let mut map_texts = vec![];
                 let overlay = match (registering, self.store.as_ref(), self.annot.as_ref(), self.reg.as_mut()) {
-                    (true, Some(store), _, Some(reg)) => registration::overlay(reg, store, &added_segments, to_pt),
+                    (true, Some(store), _, Some(reg)) => {
+                        let (shapes, texts) = registration::overlay(reg, store, &added_segments, to_pt);
+                        map_texts = texts;
+                        shapes
+                    }
                     (false, Some(store), Some(st), _) => annotate::overlay(store, st, renderer.time, selected_added, to_pt),
                     _ => vec![],
                 };
@@ -240,7 +245,6 @@ impl ApplicationHandler for App {
                 if let Some(store) = self.store.as_ref() {
                     overlay.extend(detached_overlay(store, renderer, to_pt));
                 }
-                let mut map_texts = vec![];
                 if let (false, Some(store), Some(st)) = (registering, self.store.as_ref(), self.annot.as_ref()) {
                     let cursor = [self.cursor.x as f32, self.cursor.y as f32];
                     let (trail_shapes, texts) = trail_overlay(store, st, &self.trail_routes, renderer, ppp);
