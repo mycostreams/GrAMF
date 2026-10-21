@@ -67,6 +67,38 @@ impl Registration {
     }
 }
 
+/// Where the store's flow layer (the registrator's, until a publish replaces it) put position
+/// `p`: the STG edges its runs were mapped to, dashed, and a ring at their centre. A guide for
+/// where to anchor; drawn under everything else.
+fn guide(reg: &Registration, p: usize, store: &Store, to_pt: &impl Fn([f32; 2]) -> Pos2, shapes: &mut Vec<egui::Shape>, texts: &mut Vec<MapText>) {
+    let Some(layer) = store.flow_in_store.as_ref() else { return };
+    let prefix = format!("{}/", reg.videos.positions[p].name);
+    let edges: std::collections::BTreeSet<usize> = layer
+        .run_paths
+        .iter()
+        .zip(&layer.run_edges)
+        .filter(|(run, _)| run.starts_with(&prefix))
+        .flat_map(|(_, e)| e.iter().copied())
+        .collect();
+    if edges.is_empty() {
+        return;
+    }
+    let colour = Color32::from_rgb(255, 215, 0); // yellow: apart from the green STG and cyan selection
+    let (mut sum, mut n) = ([0.0f32; 2], 0.0f32);
+    for &e in &edges {
+        let arc = &store.arcs.points[store.arcs.offsets[e]..store.arcs.offsets[e + 1]];
+        shapes.extend(egui::Shape::dashed_line(&arc.iter().map(|&q| to_pt(q)).collect::<Vec<_>>(), Stroke::new(3.5, colour), 6.0, 4.0));
+        for q in arc {
+            (sum, n) = ([sum[0] + q[0], sum[1] + q[1]], n + 1.0);
+        }
+    }
+    let centre = to_pt([sum[0] / n, sum[1] / n]);
+    shapes.push(egui::Shape::circle_stroke(centre, 9.0, Stroke::new(2.0, colour)));
+    shapes.push(egui::Shape::circle_filled(centre, 2.5, colour));
+    let who = if layer.written_by.is_empty() { "store" } else { layer.written_by.as_str() };
+    texts.push((centre + egui::vec2(12.0, -4.0), format!("{who}: {} STG edges", edges.len()), colour));
+}
+
 /// "50 · 1/2": the run number and which of the position's runs this is.
 fn run_label(reg: &Registration, p: usize, run: usize) -> String {
     let runs = &reg.videos.positions[p].runs;
@@ -80,15 +112,19 @@ fn run_label(reg: &Registration, p: usize, run: usize) -> String {
 /// anchors with a line to their video's centre.
 pub fn overlay(reg: &mut Registration, store: &Store, added: &[AddedSegment], to_pt: impl Fn([f32; 2]) -> Pos2) -> (Vec<egui::Shape>, Vec<MapText>) {
     use egui::Shape;
+    let (mut shapes, mut texts) = (vec![], vec![]);
+    // the guide also shows before the session is placed: that is when it helps most
+    if let Some(p) = reg.position {
+        guide(reg, p, store, &to_pt, &mut shapes, &mut texts);
+    }
     let fits = reg.fits();
     let Some(Some(fit)) = fits.get(reg.session) else {
-        return (vec![], vec![]);
+        return (shapes, texts);
     };
     let sim = fit.sim;
     if let Some(p) = reg.position {
         reg.last_run.insert(p, reg.run);
     }
-    let (mut shapes, mut texts) = (vec![], vec![]);
     for p in reg.sessions[reg.session].positions.clone() {
         let run = reg.shown_run(p);
         let stage = reg.videos.positions[p].stage_mm;

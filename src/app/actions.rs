@@ -343,6 +343,11 @@ impl App {
                     run_paths: flow.runs.iter().map(|r| r.run_path.to_string()).collect(),
                     n_measurements: p.measurements,
                     written_by: "GrAMF".into(),
+                    run_edges: crate::store::FlowLayer::edges_per_run(
+                        flow.runs.len(),
+                        store.n_edges(),
+                        flow.measurements.iter().map(|m| (m.run_index, m.edge_id)),
+                    ),
                 });
                 let skipped = match p.on_added_edges {
                     0 => String::new(),

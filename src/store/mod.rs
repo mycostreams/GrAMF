@@ -92,6 +92,36 @@ pub struct FlowLayer {
     pub run_paths: Vec<String>,
     pub n_measurements: usize,
     pub written_by: String,
+    /// Per run (as `run_paths`), the STG edges its measurements are on, sorted.
+    pub run_edges: Vec<Vec<usize>>,
+}
+
+impl FlowLayer {
+    /// Groups `(run_index, edge_id)` pairs into [`FlowLayer::run_edges`], skipping edges
+    /// outside the store (added edges).
+    pub fn edges_per_run(n_runs: usize, n_edges: usize, pairs: impl Iterator<Item = (i64, i64)>) -> Vec<Vec<usize>> {
+        let mut out = vec![vec![]; n_runs];
+        for (run, edge) in pairs {
+            if let (Some(list), Ok(e)) = (usize::try_from(run).ok().and_then(|r| out.get_mut(r)), usize::try_from(edge)) {
+                if e < n_edges {
+                    list.push(e);
+                }
+            }
+        }
+        for list in &mut out {
+            list.sort_unstable();
+            list.dedup();
+        }
+        out
+    }
+}
+
+/// The `/flow_measurements` columns GrAMF reads.
+#[derive(hdf5_metno::H5Type, Clone, Copy)]
+#[repr(C)]
+struct FlowMeasurementEdge {
+    edge_id: i64,
+    run_index: i64,
 }
 
 /// The `/flow_runs` column GrAMF reads (HDF5 converts compound members by name).
@@ -248,8 +278,10 @@ pub fn read_store(path: &Path) -> Result<Store, String> {
 
     let flow_in_store = file.dataset("flow_runs").and_then(|d| d.read_raw::<FlowRunRow>()).ok().map(|rows| {
         let measurements = file.dataset("flow_measurements").ok();
+        let edges = measurements.as_ref().and_then(|d| d.read_raw::<FlowMeasurementEdge>().ok()).unwrap_or_default();
         FlowLayer {
             run_paths: rows.iter().map(|r| r.run_path.to_string()).collect(),
+            run_edges: FlowLayer::edges_per_run(rows.len(), n_edges, edges.iter().map(|m| (m.run_index, m.edge_id))),
             n_measurements: measurements.as_ref().map_or(0, |d| d.shape().first().copied().unwrap_or(0)),
             written_by: measurements
                 .and_then(|d| d.attr("written_by").and_then(|a| a.read_scalar::<hdf5_metno::types::VarLenUnicode>()).ok())
