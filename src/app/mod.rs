@@ -908,6 +908,43 @@ fn trail_overlay(
     (shapes, texts)
 }
 
+/// A thin dashed line from each arc end that stops short of its node to that node, for edges
+/// that have appeared, clipped to the view so a long gap seen up close stays a few dashes.
+fn detached_overlay(store: &Store, renderer: &AppRenderer, to_pt: impl Fn([f32; 2]) -> egui::Pos2) -> Vec<egui::Shape> {
+    let (min, max) = renderer.visible_world();
+    let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(240, 170, 60));
+    let mut shapes = vec![];
+    for d in store.detached_ends() {
+        if store.edge_t[d.edge] > renderer.time {
+            continue;
+        }
+        if let Some((p, q)) = clip_segment(store.arcs.points[d.point], store.node_pos[d.node], min, max) {
+            shapes.extend(egui::Shape::dashed_line(&[to_pt(p), to_pt(q)], stroke, 4.0, 3.0));
+        }
+    }
+    shapes
+}
+
+/// The part of segment `p`-`q` inside the box `min`..`max` (Liang-Barsky), if any.
+fn clip_segment(p: [f32; 2], q: [f32; 2], min: [f32; 2], max: [f32; 2]) -> Option<([f32; 2], [f32; 2])> {
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for k in 0..2 {
+        let d = q[k] - p[k];
+        for (num, den) in [(p[k] - min[k], -d), (max[k] - p[k], d)] {
+            if den == 0.0 {
+                if num < 0.0 {
+                    return None;
+                }
+            } else {
+                let t = num / den;
+                if den < 0.0 { t0 = t0.max(t) } else { t1 = t1.min(t) }
+            }
+        }
+    }
+    let at = |t: f32| [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    (t0 <= t1).then(|| (at(t0), at(t1)))
+}
+
 /// Feedback for the current tool, in points: node dots and the node under the cursor for node
 /// tools, a rubber band from the first node while adding an edge, and the box being dragged.
 fn tool_overlay(
@@ -1242,6 +1279,9 @@ impl ApplicationHandler for App {
                     _ => vec![],
                 };
                 let mut overlay = overlay;
+                if let Some(store) = self.store.as_ref() {
+                    overlay.extend(detached_overlay(store, renderer, to_pt));
+                }
                 let mut map_texts = vec![];
                 if let (false, Some(store), Some(st)) = (registering, self.store.as_ref(), self.annot.as_ref()) {
                     let cursor = [self.cursor.x as f32, self.cursor.y as f32];
@@ -1427,5 +1467,17 @@ impl ApplicationHandler for App {
         if self.quit {
             event_loop.exit();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn clip_segment_to_box() {
+        let (min, max) = ([0.0, 0.0], [10.0, 10.0]);
+        assert_eq!(super::clip_segment([-10.0, 5.0], [20.0, 5.0], min, max), Some(([0.0, 5.0], [10.0, 5.0])));
+        assert_eq!(super::clip_segment([2.0, 2.0], [3.0, 3.0], min, max), Some(([2.0, 2.0], [3.0, 3.0])));
+        assert_eq!(super::clip_segment([-5.0, 20.0], [20.0, 20.0], min, max), None);
+        assert_eq!(super::clip_segment([-5.0, -5.0], [-1.0, 15.0], min, max), None);
     }
 }
