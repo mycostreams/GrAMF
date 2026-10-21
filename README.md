@@ -42,8 +42,10 @@ to point elsewhere.
 | | |
 |---|---|
 | File > Open store… | pick a `stg_store.h5` (on macOS File / Edit / View are in the screen's menu bar) |
-| right-drag (any tool; also left-drag with Select) / scroll / Home or View > Reset Camera | pan / zoom at the cursor / fit the plate |
-| ← → / Space | previous / next timepoint / play |
+| right-drag, Space + drag, or scroll (Shift: sideways); also left-drag with Select | pan, with any tool |
+| Option or Cmd/Ctrl + scroll, trackpad pinch | zoom at the cursor |
+| Cmd/Ctrl + = / − / 0 / 2 (View menu); Home | zoom in / out / fit the plate / zoom to the selection; fit |
+| ← → / Space tap | previous / next timepoint (Video registration: run) / play |
 | V B X M R E T | tools: select, box select, exclude, merge duplicate, root, add edge, trail |
 | Esc | cancel a tool step, else clear the selection |
 | Cmd/Ctrl+S, +Z, +Shift+Z | save annotations, undo, redo |

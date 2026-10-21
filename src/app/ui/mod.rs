@@ -124,6 +124,9 @@ pub struct UiActions {
     pub save_setup_default: bool,
     pub publish: bool,
     pub fit: bool,
+    /// Keyboard zoom by this factor (< 1: in).
+    pub zoom: Option<f32>,
+    pub zoom_selection: bool,
     /// The inspector's Raw rows section is open: keep the rows for the selected edge loaded.
     pub raw_wanted: bool,
     pub reveal: bool,
@@ -144,6 +147,14 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             actions.save = i.modifiers.command && i.key_pressed(egui::Key::S);
             actions.undo = i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z);
             actions.redo = i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z);
+            if i.modifiers.command && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus)) {
+                actions.zoom = Some(1.0 / super::ZOOM_STEP);
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
+                actions.zoom = Some(super::ZOOM_STEP);
+            }
+            actions.fit |= i.modifiers.command && i.key_pressed(egui::Key::Num0);
+            actions.zoom_selection = i.modifiers.command && i.key_pressed(egui::Key::Num2);
         });
     }
     if let (true, Some(r)) = (registering && !ui.ctx().egui_wants_keyboard_input(), reg.as_deref_mut()) {
@@ -212,8 +223,18 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
                         }
                     });
                     ui.menu_button("View", |ui| {
-                        if ui.add(egui::Button::new("Reset Camera").shortcut_text("Home")).clicked() {
+                        for (text, keys, zoom) in [("Zoom In", "Ctrl+=", 1.0 / super::ZOOM_STEP), ("Zoom Out", "Ctrl+-", super::ZOOM_STEP)] {
+                            if ui.add(egui::Button::new(text).shortcut_text(keys)).clicked() {
+                                actions.zoom = Some(zoom);
+                                ui.close();
+                            }
+                        }
+                        if ui.add(egui::Button::new("Reset Camera").shortcut_text("Ctrl+0 / Home")).clicked() {
                             actions.fit = true;
+                            ui.close();
+                        }
+                        if ui.add(egui::Button::new("Zoom to Selection").shortcut_text("Ctrl+2")).clicked() {
+                            actions.zoom_selection = true;
                             ui.close();
                         }
                         ui.separator();

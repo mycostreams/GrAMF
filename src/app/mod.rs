@@ -78,6 +78,11 @@ pub struct App {
     /// Box select: world corner where the drag started, and the edges of the last box.
     box_start: Option<[f32; 2]>,
     boxed: Vec<usize>,
+    /// Keyboard modifiers held, for scroll zoom.
+    modifiers: winit::keyboard::ModifiersState,
+    /// Space is held: left-drag pans (a tap without a drag plays / pauses).
+    space_held: bool,
+    space_panned: bool,
     /// Nudge tool drag: world point where it started, and the run's nudge before it.
     nudge_drag: Option<([f32; 2], [f32; 2])>,
     /// A file the status line offers to show in Finder / Explorer.
@@ -102,6 +107,10 @@ const NODE_PICK_RADIUS_PX: f32 = 10.0;
 /// Node tools draw every node in view up to this many.
 const MAX_NODE_DOTS: usize = 6000;
 const MAX_LABELS: usize = 1500;
+/// Keyboard zoom step (⌘= / ⌘−).
+const ZOOM_STEP: f32 = 1.5;
+/// Scroll-wheel notch in pixels, when panning with a mouse wheel.
+const LINE_PX: f32 = 40.0;
 
 impl App {
     pub fn new(open: Option<PathBuf>) -> Self {
@@ -184,6 +193,14 @@ impl App {
         if actions.fit {
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.fit();
+            }
+        }
+        if let (Some(factor), Some(renderer)) = (actions.zoom, self.renderer.as_mut()) {
+            renderer.zoom_keyboard(factor, [self.cursor.x as f32, self.cursor.y as f32]);
+        }
+        if actions.zoom_selection {
+            if let (Some((min, max)), Some(renderer)) = (self.selection_bounds(), self.renderer.as_mut()) {
+                renderer.fit_to(min, max);
             }
         }
         if actions.open {
