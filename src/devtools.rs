@@ -135,6 +135,24 @@ pub fn health(path: &Path, store: &Store, datasets: &[DatasetInfo], annotations:
         .count();
     out.push(check(missing == 0, false, format!("/edges endpoints missing from /nodes: {missing}")));
 
+    let detached = store.detached_ends();
+    out.push(check(
+        detached.is_empty(),
+        true,
+        format!("arc ends more than {} µm from their node: {} (dashed on the map)", crate::store::DETACHED_END_UM, detached.len()),
+    ));
+    for d in detached.iter().take(20) {
+        let q = store.node_pos[d.node];
+        out.push(check(
+            false,
+            true,
+            format!("    edge {}, node {} at ({:.0}, {:.0}) µm: {:.1} µm", d.edge, store.node_ids[d.node], q[0], q[1], d.gap_um),
+        ));
+    }
+    if detached.len() > 20 {
+        out.push(check(false, true, format!("    and {} more", detached.len() - 20)));
+    }
+
     let sorted = store.timepoints.windows(2).all(|w| w[0] < w[1]);
     out.push(check(sorted, false, format!("/timepoints strictly increasing ({} frames)", store.timepoints.len())));
     if !store.timepoints.is_empty() {
