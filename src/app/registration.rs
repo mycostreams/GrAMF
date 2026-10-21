@@ -1153,9 +1153,11 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
                                 edge_id,
                                 direction: if along { dir } else { -dir },
                                 run_index: out.runs.len() as i64,
-                                src_u: c.key[0],
-                                src_v: c.key[1],
-                                src_k: c.key[2],
+                                // the directed video key, as the registrator wrote it: readers such as
+                                // transport_paper's apply_streaks take the streak's sign from it
+                                src_u: d.dir[0],
+                                src_v: d.dir[1],
+                                src_k: d.dir[2],
                                 median: v[0],
                                 perc_25: v[1],
                                 perc_75: v[2],
