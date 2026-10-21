@@ -2,37 +2,68 @@
 
 use super::*;
 
+/// Map text: position, text, colour.
+pub type MapText = (Pos2, String, Color32);
+
+/// A run's matched graph and its frame outline in points: the same chain as the video edges
+/// (place, nudge, snap).
+fn run_frame(reg: &mut Registration, p: usize, run: usize, sim: &Similarity, store: &Store, added: &[AddedSegment], to_pt: &impl Fn([f32; 2]) -> Pos2) -> Option<(Rc<RunMatch>, Vec<Pos2>)> {
+    let m = reg.run_match(p, run, sim, store, added)?;
+    let pos = &reg.videos.positions[p];
+    let (stage, frame, dx) = (pos.stage_mm, pos.runs[run].frame_size, pos.runs[run].delta_x_um);
+    let (camera, rigid) = (reg.camera(), m.snap.unwrap_or_default());
+    let place = |q: [f32; 2]| {
+        let w = placement::place(sim, camera, stage, q);
+        to_pt(rigid.apply([w[0] + m.nudge[0], w[1] + m.nudge[1]]))
+    };
+    let (hw, hh) = (frame[1] as f32 * dx / 2.0, frame[0] as f32 * dx / 2.0);
+    let corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh], [-hw, -hh]].into_iter().map(place).collect();
+    Some((m, corners))
+}
+
+/// "50 · 1/2": the run number and which of the position's runs this is.
+fn run_label(reg: &Registration, p: usize, run: usize) -> String {
+    let runs = &reg.videos.positions[p].runs;
+    let nr = runs[run].run_nr.map_or("run".to_string(), |n| n.to_string());
+    if runs.len() > 1 { format!("{nr} · {}/{}", run + 1, runs.len()) } else { nr }
+}
+
 /// Placed videos of the selected session, in points: each shown run's snapped graph and frame
-/// outline; for the selected position every video edge in its own colour, with its STG chain
-/// in the same colour and its gaps dashed; anchors with a line to their video's centre.
-pub fn overlay(reg: &mut Registration, store: &Store, added: &[AddedSegment], to_pt: impl Fn([f32; 2]) -> Pos2) -> Vec<egui::Shape> {
+/// outline, labelled with its run; for the selected position its other runs in grey, and every
+/// video edge in its own colour, with its STG chain in the same colour and its gaps dashed;
+/// anchors with a line to their video's centre.
+pub fn overlay(reg: &mut Registration, store: &Store, added: &[AddedSegment], to_pt: impl Fn([f32; 2]) -> Pos2) -> (Vec<egui::Shape>, Vec<MapText>) {
     use egui::Shape;
     let fits = reg.fits();
     let Some(Some(fit)) = fits.get(reg.session) else {
-        return vec![];
+        return (vec![], vec![]);
     };
     let sim = fit.sim;
-    let camera = reg.camera();
-    let mut shapes = vec![];
+    if let Some(p) = reg.position {
+        reg.last_run.insert(p, reg.run);
+    }
+    let (mut shapes, mut texts) = (vec![], vec![]);
     for p in reg.sessions[reg.session].positions.clone() {
         let run = reg.shown_run(p);
-        let (stage, frame, dx) = {
-            let pos = &reg.videos.positions[p];
-            (pos.stage_mm, pos.runs[run].frame_size, pos.runs[run].delta_x_um)
-        };
+        let stage = reg.videos.positions[p].stage_mm;
         let selected = reg.position == Some(p);
         let faint = Color32::from_rgba_unmultiplied(150, 190, 230, 150);
-        let Some(m) = reg.run_match(p, run, &sim, store, added) else { continue };
-        let rigid = m.snap.unwrap_or_default();
-        // same chain as the video edges: place, nudge, snap
-        let place = |q: [f32; 2]| {
-            let w = placement::place(&sim, camera, stage, q);
-            to_pt(rigid.apply([w[0] + m.nudge[0], w[1] + m.nudge[1]]))
-        };
-        let (hw, hh) = (frame[1] as f32 * dx / 2.0, frame[0] as f32 * dx / 2.0);
-        let corners: Vec<Pos2> = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh], [-hw, -hh]].into_iter().map(place).collect();
+        if selected {
+            // the position's other runs, in grey, so they do not vanish behind the selected one
+            let grey = Color32::from_rgba_unmultiplied(170, 170, 170, 110);
+            for other in (0..reg.videos.positions[p].runs.len()).filter(|&r| r != run) {
+                let Some((m, corners)) = run_frame(reg, p, other, &sim, store, added, &to_pt) else { continue };
+                shapes.extend(Shape::dashed_line(&corners, Stroke::new(1.0, grey), 2.0, 4.0));
+                for pts in &m.placed {
+                    shapes.push(Shape::line(pts.iter().map(|&q| to_pt(q)).collect(), Stroke::new(1.0, grey)));
+                }
+                texts.push((corners[0], run_label(reg, p, other), grey));
+            }
+        }
+        let Some((m, corners)) = run_frame(reg, p, run, &sim, store, added, &to_pt) else { continue };
         let outline = if selected { Color32::from_rgb(80, 220, 240) } else { faint };
         shapes.extend(Shape::dashed_line(&corners, Stroke::new(1.0, outline), 4.0, 3.0));
+        texts.push((corners[0], run_label(reg, p, run), outline));
         for (i, (pts, cover)) in m.placed.iter().zip(&m.covers).enumerate() {
             let line: Vec<Pos2> = pts.iter().map(|&q| to_pt(q)).collect();
             let chosen = reg.video_edge == Some(cover.key);
@@ -78,7 +109,7 @@ pub fn overlay(reg: &mut Registration, store: &Store, added: &[AddedSegment], to
             shapes.push(Shape::circle_stroke(at, 6.0, Stroke::new(2.0, ANCHORED)));
         }
     }
-    shapes
+    (shapes, texts)
 }
 
 /// A click with the Select tool: the selected position's video edge under `at` (µm) when

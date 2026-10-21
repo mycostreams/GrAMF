@@ -133,6 +133,9 @@ pub struct Registration {
     matches: HashMap<String, (String, Rc<RunMatch>)>,
     /// Stage scatter zoom and pan (points), for the session it was set in.
     scatter_view: (usize, f32, egui::Vec2),
+    /// Position -> the run last selected there, kept on the map once the position is
+    /// deselected so its (per-run) nudge does not appear to jump back.
+    last_run: HashMap<usize, usize>,
 }
 
 impl Registration {
@@ -161,6 +164,7 @@ impl Registration {
             video_edge: None,
             matches: HashMap::new(),
             scatter_view: (0, 1.0, egui::Vec2::ZERO),
+            last_run: HashMap::new(),
         }
     }
 
@@ -293,11 +297,15 @@ impl Registration {
     }
 
     /// The run shown for position `p`: the selected run for the selected position, else the
-    /// run closest in time to it (the latest run when nothing is selected).
+    /// run last selected there, else the run closest in time to the selected one (the latest
+    /// run when nothing is selected).
     pub fn shown_run(&self, p: usize) -> usize {
         let runs = &self.videos.positions[p].runs;
         if self.position == Some(p) {
             return self.run.min(runs.len() - 1);
+        }
+        if let Some(&run) = self.last_run.get(&p) {
+            return run.min(runs.len() - 1);
         }
         match self.selected_run_utc() {
             Some(t) => (0..runs.len()).min_by_key(|&i| (runs[i].utc - t).abs()).unwrap_or(0),
