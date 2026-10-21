@@ -111,6 +111,16 @@ impl ApplicationHandler for App {
             } => match (key_code, state) {
                 (winit::keyboard::KeyCode::Escape, ElementState::Pressed) => escape = true,
                 (winit::keyboard::KeyCode::Home, ElementState::Pressed) => renderer.fit(),
+                // Video registration: left / right switch between the selected position's runs
+                (key @ (winit::keyboard::KeyCode::ArrowLeft | winit::keyboard::KeyCode::ArrowRight), ElementState::Pressed)
+                    if self.workflow == registration::Workflow::Registration
+                        && self.reg.as_ref().is_some_and(|r| r.position.is_some()) =>
+                {
+                    if let Some(reg) = self.reg.as_mut() {
+                        let n = reg.position.map_or(1, |p| reg.videos.positions[p].runs.len());
+                        reg.run = if key == winit::keyboard::KeyCode::ArrowLeft { reg.run.saturating_sub(1) } else { (reg.run + 1).min(n - 1) };
+                    }
+                }
                 (key, ElementState::Pressed) => {
                     if let Some(timeline) = self.timeline.as_mut() {
                         match key {
@@ -130,20 +140,30 @@ impl ApplicationHandler for App {
             } => {
                 let registering = self.workflow == registration::Workflow::Registration;
                 let boxing = !registering && self.annot.as_ref().is_some_and(|a| a.tool == Tool::BoxSelect);
-                let nudging = registering
-                    && self.reg.as_ref().is_some_and(|r| r.tool == registration::RegTool::Nudge && r.position.is_some());
+                let nudging = registering && self.reg.as_ref().is_some_and(|r| r.tool == registration::RegTool::Nudge);
                 let cursor = [self.cursor.x as f32, self.cursor.y as f32];
                 let pressed = state == ElementState::Pressed;
-                if let (true, Some(reg)) = (nudging, self.reg.as_mut()) {
-                    let p = reg.position.unwrap_or(0);
-                    let rel = reg.run_path(p, reg.shown_run(p));
+                if let (true, Some(reg), Some(store)) = (nudging, self.reg.as_mut(), self.store.as_ref()) {
+                    // Nudge: a press inside a video frame selects that run and drags it; a press
+                    // outside every frame does nothing.
                     if pressed {
-                        let base = reg.layer.nudges.get(&rel).copied().unwrap_or([0.0; 2]);
-                        self.nudge_drag = Some((renderer.screen_to_world(cursor), base));
-                    } else if self.nudge_drag.take().is_some() {
-                        if let Some(n) = reg.drag_nudge.take() {
-                            reg.pending.push(Op::SetNudge(rel, Some(n)));
+                        let at = renderer.screen_to_world(cursor);
+                        if let Some((p, run)) = reg.frame_at(at, store, &added_segments(store, self.annot.as_ref())) {
+                            if (reg.position, reg.run) != (Some(p), run) {
+                                reg.video_edge = None;
+                            }
+                            reg.position = Some(p);
+                            reg.run = run;
+                            let base = reg.layer.nudges.get(&reg.run_path(p, run)).copied().unwrap_or([0.0; 2]);
+                            self.nudge_drag = Some((at, base));
+                            self.press = Some(self.cursor);
                         }
+                    } else if self.nudge_drag.take().is_some() {
+                        let moved = self.press.take().is_some_and(|p| (p.x - self.cursor.x).hypot(p.y - self.cursor.y) >= 3.0);
+                        if let (true, Some(n), Some(p)) = (moved, reg.drag_nudge.take(), reg.position) {
+                            reg.pending.push(Op::SetNudge(reg.run_path(p, reg.run), Some(n)));
+                        }
+                        reg.drag_nudge = None; // a click without a drag only selects
                     }
                 } else if boxing {
                     if pressed {
