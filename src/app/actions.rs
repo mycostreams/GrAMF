@@ -265,8 +265,12 @@ impl App {
         let mut flow_note = String::new();
         if let (Some(reg), Some(store), Some(st)) = (self.reg.as_mut(), self.store.as_ref(), self.annot.as_mut()) {
             let added = added_segments(store, Some(&*st));
-            let (flow, sessions, runs) = registration::flow_output(reg, store, &added);
+            let (flow, sessions, runs, missing) = registration::flow_output(reg, store, &added);
             flow_note = format!(" · flow: {sessions} verified sessions, {runs} runs, {} measurements", flow.measurements.len());
+            if !missing.is_empty() {
+                let names: Vec<String> = missing.iter().map(|&(p, run)| reg.run_path(p, run)).collect();
+                flow_note += &format!(" · {} runs without flow: {}", missing.len(), names.join(", "));
+            }
             st.own.flow = (!flow.runs.is_empty()).then_some(flow);
         }
         let trail_paths = self.trail_paths();
