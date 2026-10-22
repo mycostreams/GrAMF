@@ -9,7 +9,7 @@ fn utc(t: i64) -> String {
 
 /// Left panel: where the runs come from, the sessions, and the stage scatter of the selected
 /// session. Without runs, a button to pick the folder.
-pub fn left_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, store: &Store) -> Action {
+pub fn left_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, store: &Store, added: &[AddedSegment]) -> Action {
     let mut action = Action::None;
     ui.heading("Video runs");
     let Some(reg) = reg else {
@@ -44,6 +44,7 @@ pub fn left_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, store: &Sto
     }
     if let Some(Some(fit)) = fits.get(reg.session) {
         session_details(ui, reg, fit, store, &mut action);
+        runs_without_flow(ui, reg, store, added, &mut action);
     }
 
     ui.separator();
@@ -79,6 +80,27 @@ fn session_status(reg: &Registration, i: usize, fit: Option<&SessionFit>) -> Str
 }
 
 /// The selected session's fit: score, anchors with residuals, and its buttons.
+/// The selected session's runs that give no flow in its placement, each a button that selects
+/// the run and zooms to it: a run whose frame landed off its hyphae is otherwise easy to miss.
+fn runs_without_flow(ui: &mut egui::Ui, reg: &mut Registration, store: &Store, added: &[AddedSegment], action: &mut Action) {
+    let missing = reg.runs_without_flow(store, added);
+    let n: usize = reg.sessions[reg.session].positions.iter().map(|&p| reg.videos.positions[p].runs.len()).sum();
+    if missing.is_empty() {
+        ui.label(egui::RichText::new(format!("all {n} runs give flow")).weak().small());
+        return;
+    }
+    ui.colored_label(Color32::YELLOW, format!("{} of {n} runs give no flow", missing.len())).on_hover_text(
+        "no video edge of the run lies on the STG in this placement (or its graph or flow file could not be read): Publish leaves it out",
+    );
+    for (p, run) in missing {
+        if ui.small_button(reg.run_path(p, run)).on_hover_text("select this run and zoom to it").clicked() {
+            reg.position = Some(p);
+            reg.run = run;
+            *action = Action::ZoomRun;
+        }
+    }
+}
+
 fn session_details(ui: &mut egui::Ui, reg: &mut Registration, fit: &SessionFit, store: &Store, action: &mut Action) {
     let i = reg.session;
     let score = reg.score(i, fit, store);
@@ -257,15 +279,16 @@ pub fn right_panel(
     unit: TimeUnit,
     store: &Store,
     added: &[AddedSegment],
-) {
+) -> bool {
     ui.heading("Position");
     let Some(reg) = reg else {
-        return;
+        return false;
     };
     let Some(p) = reg.position else {
         ui.label(egui::RichText::new("Click a position in the stage scatter").weak());
-        return;
+        return false;
     };
+    let zoom = ui.small_button("Zoom to run").on_hover_text("fit the view to the selected run's frame (⌘2)").clicked();
     let pos = &reg.videos.positions[p];
     ui.strong(&pos.name);
     ui.label(format!("stage x {:.3}  y {:.3} mm · {} runs", pos.stage_mm[0], pos.stage_mm[1], pos.runs.len()));
@@ -311,12 +334,25 @@ pub fn right_panel(
         });
     }
     let n_runs = pos.runs.len();
+    // live, from the current placement: the store mark only says what was last published
+    let chained: Vec<Option<usize>> = (0..n_runs).map(|i| reg.chained_edges(p, i, store, added)).collect();
+    let pos = &reg.videos.positions[p];
     let mut chosen = None;
-    egui::CollapsingHeader::new(format!("All runs ({n_runs})")).show(ui, |ui| {
+    egui::CollapsingHeader::new(format!("All runs ({n_runs})")).default_open(true).show(ui, |ui| {
         egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
             for (i, run) in pos.runs.iter().enumerate() {
-                let mark = if reg.mapped_in_store.contains(&run.rel_path) { " · mapped" } else { "" };
-                if ui.selectable_label(reg.run == i, format!("{} · {}{mark}", utc(run.utc), run.mode)).clicked() {
+                let stored = if reg.mapped_in_store.contains(&run.rel_path) { " · in store" } else { "" };
+                let (live, colour) = match chained[i] {
+                    Some(0) => ("0 edges chained".to_string(), Some(Color32::YELLOW)),
+                    Some(n) => (format!("{n} edges chained"), None),
+                    None if reg.fits().get(reg.session).is_some_and(|f| f.is_some()) => ("no video graph".to_string(), Some(Color32::LIGHT_RED)),
+                    None => ("not placed".to_string(), None),
+                };
+                let mut text = egui::RichText::new(format!("{} · {} · {live}{stored}", utc(run.utc), run.mode));
+                if let Some(c) = colour {
+                    text = text.color(c);
+                }
+                if ui.selectable_label(reg.run == i, text).clicked() {
                     chosen = Some(i);
                 }
             }
@@ -326,6 +362,7 @@ pub fn right_panel(
         reg.run = i;
     }
     edges_section(ui, reg, store, added);
+    zoom
 }
 
 /// Bottom bar: step through the selected position's runs; the STG time follows the run.

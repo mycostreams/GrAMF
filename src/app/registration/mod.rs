@@ -125,6 +125,8 @@ pub struct Registration {
     pub trust_default_offset: bool,
     /// Loaded video graphs by run path (`None`: could not be read).
     graphs: HashMap<String, Option<Rc<VideoGraph>>>,
+    /// Read flow values by run path.
+    flows: HashMap<String, Result<RunFlow, String>>,
     /// Fit score per session, with the (transform, camera) it was computed for.
     scores: HashMap<usize, (String, Option<f32>)>,
     /// The selected video edge of the selected run.
@@ -160,6 +162,7 @@ impl Registration {
             default: default.map(|d| d.transform),
             trust_default_offset,
             graphs: HashMap::new(),
+            flows: HashMap::new(),
             scores: HashMap::new(),
             video_edge: None,
             matches: HashMap::new(),
@@ -265,7 +268,8 @@ impl Registration {
             }
         }
         let disabled = covers.iter().map(|c| self.layer.disabled.contains(&(rel.clone(), c.key))).collect();
-        let flow = crate::video::flow::read(&self.videos.root.join(&rel));
+        let root = &self.videos.root;
+        let flow = self.flows.entry(rel.clone()).or_insert_with(|| crate::video::flow::read(&root.join(&rel))).clone();
         let m = Rc::new(RunMatch { snap, placed, covers, flow, assigned, disabled, nudge });
         self.matches.insert(rel, (key, m.clone()));
         Some(m)
@@ -397,14 +401,17 @@ pub enum Action {
     ChooseFolder,
     DetectCamera,
     SaveDefault,
+    /// A run was selected from a list: fit the view to its frame.
+    ZoomRun,
     None,
 }
 
 /// The flow layer of every verified session: per run, each non-artifact video edge's flow
 /// mapped onto every STG edge of its chain, with the direction in `/edges` terms. Returns the
-/// layer, the number of verified sessions and of runs that contributed.
-pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]) -> (crate::annotations::FlowOutput, usize, usize) {
-    use crate::annotations::{FlowMeasurementRow, FlowOutput, FlowRunRow};
+/// layer, the number of verified sessions and of runs that contributed, and the verified
+/// sessions' runs that contributed nothing (`(position, run)`).
+pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]) -> (crate::annotations::FlowOutput, usize, usize, Vec<(usize, usize)>) {
+    use crate::annotations::{FlowOutput, FlowRunRow};
     use hdf5_metno::types::VarLenUnicode;
     use std::str::FromStr;
     let text = |s: &str| VarLenUnicode::from_str(s).unwrap_or_default();
@@ -415,7 +422,7 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
         n_pins: reg.layer.assignments.len() as i64,
         ..Default::default()
     };
-    let mut sessions = 0;
+    let (mut sessions, mut missing) = (0, vec![]);
     for (i, fit) in fits.iter().enumerate() {
         let (Some(fit), Some(key)) = (fit, reg.session_key(i)) else { continue };
         if !reg.layer.verified.contains(&key) {
@@ -424,45 +431,13 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
         sessions += 1;
         for p in reg.sessions[i].positions.clone() {
             for run in 0..reg.videos.positions[p].runs.len() {
-                let Some(m) = reg.run_match(p, run, &fit.sim, store, added) else { continue };
-                let Ok(flow) = &m.flow else { continue };
-                let r = &reg.videos.positions[p].runs[run];
-                let mut rows = vec![];
-                for (c, disabled) in m.covers.iter().zip(&m.disabled) {
-                    let Some(dirs) = flow.get(&c.key).filter(|_| !disabled) else { continue };
-                    for (&(e, dir), span) in c.chain.iter().zip(&c.spans) {
-                        let edge_id = match e {
-                            EdgeRef::Pipeline(e) => e as i64,
-                            EdgeRef::Added(id) => id,
-                        };
-                        for d in dirs {
-                            let along = d.dir == c.key;
-                            let v = d.values;
-                            rows.push(FlowMeasurementRow {
-                                edge_id,
-                                direction: if along { dir } else { -dir },
-                                run_index: out.runs.len() as i64,
-                                // the directed video key, as the registrator wrote it: readers such as
-                                // transport_paper's apply_streaks take the streak's sign from it
-                                src_u: d.dir[0],
-                                src_v: d.dir[1],
-                                src_k: d.dir[2],
-                                median: v[0],
-                                perc_25: v[1],
-                                perc_75: v[2],
-                                flux_ratio: v[3],
-                                coverage: v[4],
-                                pixel_count: v[5],
-                                flux: v[6],
-                                s_start_um: span[0] as f64,
-                                s_end_um: span[1] as f64,
-                            });
-                        }
-                    }
-                }
+                let mut rows = reg.run_rows(p, run, &fit.sim, store, added);
                 if rows.is_empty() {
+                    missing.push((p, run));
                     continue;
                 }
+                rows.iter_mut().for_each(|r| r.run_index = out.runs.len() as i64);
+                let r = &reg.videos.positions[p].runs[run];
                 let frame = crate::video::runs::stg_frame(r.utc, &store.timepoints).map_or(r.utc, |f| store.timepoints[f]);
                 out.runs.push(FlowRunRow {
                     run_path: text(&r.rel_path),
@@ -476,7 +451,74 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
         }
     }
     let runs = out.runs.len();
-    (out, sessions, runs)
+    (out, sessions, runs, missing)
+}
+
+impl Registration {
+    /// Run `run` of position `p`'s flow rows under `sim` (`run_index` 0): each non-artifact
+    /// video edge's flow on every STG edge of its chain. Empty: the run gives no flow (no
+    /// graph, no flow file, or no video edge on the STG).
+    pub fn run_rows(&mut self, p: usize, run: usize, sim: &Similarity, store: &Store, added: &[AddedSegment]) -> Vec<crate::annotations::FlowMeasurementRow> {
+        let Some(m) = self.run_match(p, run, sim, store, added) else { return vec![] };
+        let Ok(flow) = &m.flow else { return vec![] };
+        let mut rows = vec![];
+        for (c, disabled) in m.covers.iter().zip(&m.disabled) {
+            let Some(dirs) = flow.get(&c.key).filter(|_| !disabled) else { continue };
+            for (&(e, dir), span) in c.chain.iter().zip(&c.spans) {
+                let edge_id = match e {
+                    EdgeRef::Pipeline(e) => e as i64,
+                    EdgeRef::Added(id) => id,
+                };
+                for d in dirs {
+                    let along = d.dir == c.key;
+                    let v = d.values;
+                    rows.push(crate::annotations::FlowMeasurementRow {
+                        edge_id,
+                        direction: if along { dir } else { -dir },
+                        run_index: 0,
+                        // the directed video key, as the registrator wrote it: readers such as
+                        // transport_paper's apply_streaks take the streak's sign from it
+                        src_u: d.dir[0],
+                        src_v: d.dir[1],
+                        src_k: d.dir[2],
+                        median: v[0],
+                        perc_25: v[1],
+                        perc_75: v[2],
+                        flux_ratio: v[3],
+                        coverage: v[4],
+                        pixel_count: v[5],
+                        flux: v[6],
+                        s_start_um: span[0] as f64,
+                        s_end_um: span[1] as f64,
+                    });
+                }
+            }
+        }
+        rows
+    }
+
+    /// Run `run` of position `p` in the selected session's placement: how many of its video
+    /// edges have an STG chain (artifacts left out). `None`: not placed, or no video graph.
+    pub fn chained_edges(&mut self, p: usize, run: usize, store: &Store, added: &[AddedSegment]) -> Option<usize> {
+        let sim = self.fits().get(self.session)?.as_ref()?.sim;
+        let m = self.run_match(p, run, &sim, store, added)?;
+        Some(m.covers.iter().zip(&m.disabled).filter(|&(c, d)| !d && !c.chain.is_empty()).count())
+    }
+
+    /// The selected session's runs that give no flow in its current placement (`(position,
+    /// run)`): what Publish would leave out. Empty when the session is not placed.
+    pub fn runs_without_flow(&mut self, store: &Store, added: &[AddedSegment]) -> Vec<(usize, usize)> {
+        let Some(Some(fit)) = self.fits().get(self.session).map(|f| f.as_ref().map(|f| f.sim)) else { return vec![] };
+        let mut out = vec![];
+        for p in self.sessions[self.session].positions.clone() {
+            for run in 0..self.videos.positions[p].runs.len() {
+                if self.run_rows(p, run, &fit, store, added).is_empty() {
+                    out.push((p, run));
+                }
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -497,5 +539,58 @@ mod tests {
         assert_eq!(super::panels::run_numbers(&[run(Some(3)), run(None), run(Some(7))]).as_deref(), Some("3, 7"));
         assert_eq!(super::panels::run_numbers(&[run(Some(9))]).as_deref(), Some("9"));
         assert_eq!(super::panels::run_numbers(&[run(None)]), None);
+    }
+
+    /// A verified session's run whose video edge lands off the STG gives no rows and is
+    /// reported as missing, beside a run that does give rows.
+    #[test]
+    fn flow_output_reports_runs_without_flow() {
+        use crate::store::{Arcs, Store};
+        use crate::video::flow::DirectionFlow;
+        use crate::video::runs::{Position, Run, Setup, VideoEdge, VideoGraph, Videos};
+        let mut store = Store {
+            arcs: Arcs { offsets: vec![0, 2], points: vec![[0.0, 0.0], [200.0, 0.0]], min: [0.0, 0.0], max: [200.0, 0.0] },
+            node_ids: vec![1, 2],
+            node_pos: vec![[0.0, 0.0], [200.0, 0.0]],
+            edge_nodes: vec![[1, 2]],
+            ..Default::default()
+        };
+        store.node_index = store.node_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        let run = |rel: &str, utc| Run {
+            rel_path: rel.into(),
+            utc,
+            mode: "brightfield".into(),
+            run_nr: None,
+            delta_x_um: 1.0,
+            frame_size: [100, 100],
+            camera: String::new(),
+            stage_mm: None,
+        };
+        let videos = Videos {
+            root: "/nonexistent".into(),
+            positions: vec![Position { name: "p".into(), stage_mm: [0.0, 0.0], runs: vec![run("p/on", 0), run("p/off", 60)] }],
+            setup: Setup::Morrison,
+            skipped: vec![],
+        };
+        let mut reg = super::Registration::new(videos, 30.0, &store, None);
+        let mut layer = crate::annotations::RegistrationLayer { snap: Some(false), ..Default::default() };
+        layer.anchors.insert("p".into(), [100.0, 0.0]);
+        layer.verified.insert("p".into());
+        reg.sync(&layer);
+        // "on" runs along the arc; "off" sits 40 µm beside it, beyond the 10 µm threshold
+        for (rel, y) in [("p/on", 0.0), ("p/off", 40.0)] {
+            let edge = VideoEdge { key: [0, 1, 0], points: vec![[-40.0, y], [40.0, y]] };
+            reg.graphs.insert(rel.into(), Some(std::rc::Rc::new(VideoGraph { edges: vec![edge] })));
+            let flow = DirectionFlow { dir: [0, 1, 0], values: [1.0; 7] };
+            reg.flows.insert(rel.into(), Ok([([0, 1, 0], vec![flow])].into()));
+        }
+        let (out, sessions, runs, missing) = super::flow_output(&mut reg, &store, &[]);
+        assert_eq!((sessions, runs), (1, 1));
+        assert_eq!(out.runs[0].run_path.as_str(), "p/on");
+        assert!(!out.measurements.is_empty() && out.measurements.iter().all(|m| m.run_index == 0));
+        assert_eq!(missing, vec![(0, 1)]);
+        // the panel's live view agrees
+        assert_eq!(reg.runs_without_flow(&store, &[]), vec![(0, 1)]);
+        assert_eq!((reg.chained_edges(0, 0, &store, &[]), reg.chained_edges(0, 1, &store, &[])), (Some(1), Some(0)));
     }
 }

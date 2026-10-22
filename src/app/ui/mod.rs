@@ -319,10 +319,11 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
         });
         if registering {
             if let Some(store) = store {
-                match registration::left_panel(ui, reg.as_deref_mut(), store) {
+                match registration::left_panel(ui, reg.as_deref_mut(), store, added_segments) {
                     registration::Action::ChooseFolder => actions.choose_videos = true,
                     registration::Action::DetectCamera => actions.detect_camera = true,
                     registration::Action::SaveDefault => actions.save_setup_default = true,
+                    registration::Action::ZoomRun => actions.zoom_selection = true,
                     registration::Action::None => (),
                 }
             }
@@ -384,7 +385,7 @@ pub fn build_ui(ui: &mut egui::Ui, frame: FrameState) -> UiActions {
             let unit = timeline.map_or(TimeUnit::Utc, |t| t.unit);
             if let Some(store) = store {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    registration::right_panel(ui, reg.as_deref_mut(), timeline.map(|t| &t.axis), unit, store, added_segments);
+                    actions.zoom_selection |= registration::right_panel(ui, reg.as_deref_mut(), timeline.map(|t| &t.axis), unit, store, added_segments);
                 });
             }
             return;
