@@ -1,26 +1,29 @@
 # GrAMF
 
-A Rust / wgpu desktop application to view, annotate and export the spatio-temporal graphs
-(STGs) of AMF (arbuscular mycorrhizal fungi) networks that [STHype](../STHype) writes as
-`stg_store.h5`. It is the visualisation corner of the ecosystem (see
-[../docs/Overview.md](../docs/Overview.md)); [DESIGN.md](DESIGN.md) records the decisions.
+A Rust / wgpu desktop app to view and annotate the spatio-temporal graphs (STGs) of AMF
+networks that [STHype](https://github.com/mycostreams/STHype) writes as `stg_store.h5`, and
+to register flow videos onto them (it replaces `registrator`). Colleagues run it on their own
+laptops. [DESIGN.md](DESIGN.md) records the decisions.
 
-## Status
+In the pipeline: it reads the store and the plate's flow folders, and writes annotations and,
+on Publish, the store's flow layer. See
+[rhizosphere/repos/GrAMF.md](https://github.com/Staalduine/rhizosphere/blob/main/repos/GrAMF.md).
 
-v1 features are in (M1–M6 of [DESIGN.md](DESIGN.md) §6):
+## What it does
 
-- opens `stg_store.h5` **read-only** (anchor-seg and arc-unit stores) and draws every arc;
+- opens `stg_store.h5` read-only (anchor-seg and arc-unit stores) and draws every arc;
 - time slider with dated growth, in frames, UTC, hours since inoculation or since crossing
-  (plate dates from the lab registry `AMF-PlateList`);
-- click to inspect edges, nodes and hyperedges; colour by t_first, width or hyperedge;
-  node and hyperedge id labels;
+  (plate dates from the lab registry `AMF-PlateList`); colour by t_first, width or hyperedge;
+- click to inspect edges, nodes and hyperedges;
 - per-author annotation files `annotations.<author>.h5` (exclude, merge duplicates, roots,
-  added edges, notes, hyperedge overrides) with undo/redo — the store is never written;
-- CSV / GeoJSON export with a README of provenance;
+  added edges, trails, notes, hyperedge overrides) with undo/redo;
+- video registration: places the plate's flow runs on the STG and matches them to its edges;
+- **Publish to store** writes the flow layer, trails and roots into the store, after keeping
+  the original as `stg_store.h5.bak-before-gramf-publish-<date>`. This is the only time GrAMF
+  writes a store;
+- CSV / GeoJSON export with a provenance README;
 - a developer view (View > Developer) with the store's datasets, health checks, raw rows
   and the matcher evidence behind the dating.
-
-Next: video registration (replacing `registrator`), then per-frame spatial graphs.
 
 ## Install (lab colleagues)
 
@@ -57,10 +60,10 @@ Your annotations are saved as `annotations.<your name>.h5` next to the store; co
 files there show as extra layers. Trails (T) follow the shortest path through the waypoints
 you click and are saved with your annotations.
 
-**Video registration** (in progress, replacing `registrator`): the second workflow button lists
-the plate's video runs from a `polyflow_analysis` folder beside the store (or one you choose),
-grouped into sessions, with a stage scatter and a run slider that moves the STG to the run's
-time. Placement, matching and corrections follow (DESIGN.md §6, R3–R6).
+**Video registration**: the second workflow button lists the plate's video runs from a
+`polyflow_analysis` or `polyflow_data` folder beside the store (or one you choose), grouped
+into sessions, with a stage scatter and a run slider that moves the STG to the run's time.
+Place a session, nudge runs onto the graph, then press **Publish to store…** in the registration panel.
 
 Settings (⌘, on macOS, File > Settings… elsewhere) hold your author name, the plate registry
 folder and the video-registration session gap; they live in `~/.gramf/settings`.
