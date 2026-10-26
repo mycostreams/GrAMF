@@ -214,6 +214,8 @@ Only implemented workflows get a button; v1 ships with one, so the switcher appe
 - Navigation follows Adobe: scroll pans (Shift: sideways), Space + drag pans with any tool (a Space tap plays),
   ⌥ or ⌘ + scroll and pinch zoom at the cursor; ⌘= / ⌘− / ⌘0 / ⌘2 zoom in, out, fit, to the selection
   (the selected video frame in Video registration).
+  The stage scatter takes the same controls while the pointer is over it (Home / ⌘0 fit the scatter,
+  ⌘= / ⌘− zoom it, and the map stays put).
 - Node tools (Root, Add edge) draw nodes, ring the one under the cursor (10 px snap) and, while
   adding an edge, show a rubber band from the first node.
 - Lines are screen-space quads: thickness in px, optionally following each edge's width at the

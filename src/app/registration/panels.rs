@@ -162,23 +162,35 @@ fn flow_layer_note(ui: &mut egui::Ui, store: &Store) {
     }
 }
 
-/// Positions of the selected session, oriented like the map; click selects, scroll zooms,
-/// drag pans, double-click resets. Run numbers show where a dot has room for them.
+/// Positions of the selected session, oriented like the map. Navigation is the main window's
+/// while the pointer is over it: scroll pans (Shift: sideways), ⌥ or ⌘ + scroll and pinch zoom at
+/// the cursor, a drag pans (with or without Space), ⌘= / ⌘− zoom, Home / ⌘0 or a double-click fit;
+/// a click selects. Run numbers show where a dot has room.
 fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>]) {
+    reg.scatter_hovered = false;
     let Some(session) = reg.sessions.get(reg.session) else {
         return;
     };
     let size = egui::vec2(ui.available_width(), 170.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    // Home / ⌘0 / ⌘= / ⌘− reach the scatter through App (they are window and menu shortcuts).
+    reg.scatter_hovered = response.contains_pointer();
     if reg.scatter_view.0 != reg.session || response.double_clicked() {
         reg.scatter_view = (reg.session, 1.0, egui::Vec2::ZERO);
     }
     let (_, zoom, pan) = &mut reg.scatter_view;
     *pan += response.drag_delta();
     if let Some(cursor) = response.hover_pos() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll != 0.0 {
-            let factor = (scroll * 0.005).exp().clamp(0.5, 2.0);
+        // egui already turns ⌘ (Ctrl) + scroll and pinch into zoom_delta, and Shift + scroll into
+        // a sideways scroll; ⌥ + scroll zooms here, as it does in the main window.
+        let (scroll, mut factor, alt) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers.alt));
+        if alt {
+            let d = if scroll.y != 0.0 { scroll.y } else { scroll.x };
+            factor *= (d * 0.0035).exp(); // the main window's speed: a 40 px notch = 1.15x
+        } else {
+            *pan += scroll;
+        }
+        if factor != 1.0 {
             let new_zoom = (*zoom * factor).clamp(1.0, 200.0);
             // keep the point under the cursor in place
             let from_centre = cursor - rect.center() - *pan;

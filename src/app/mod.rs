@@ -190,13 +190,21 @@ impl App {
         if let (true, Some(path)) = (actions.reveal, self.reveal.as_ref()) {
             reveal_in_file_manager(path);
         }
+        // Over the stage scatter, fit and keyboard zoom act on the scatter instead of the map.
+        let scatter = self.scatter_hovered();
         if actions.fit {
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.fit();
+            match (scatter, self.reg.as_mut(), self.renderer.as_mut()) {
+                (true, Some(reg), _) => reg.scatter_reset(),
+                (_, _, Some(renderer)) => renderer.fit(),
+                _ => (),
             }
         }
-        if let (Some(factor), Some(renderer)) = (actions.zoom, self.renderer.as_mut()) {
-            renderer.zoom_keyboard(factor, [self.cursor.x as f32, self.cursor.y as f32]);
+        if let Some(factor) = actions.zoom {
+            match (scatter, self.reg.as_mut(), self.renderer.as_mut()) {
+                (true, Some(reg), _) => reg.scatter_zoom(factor),
+                (_, _, Some(renderer)) => renderer.zoom_keyboard(factor, [self.cursor.x as f32, self.cursor.y as f32]),
+                _ => (),
+            }
         }
         if actions.zoom_selection {
             if let (Some((min, max)), Some(renderer)) = (self.selection_bounds(), self.renderer.as_mut()) {
@@ -208,6 +216,13 @@ impl App {
                 .add_filter("STG store", &["h5"])
                 .pick_file();
         }
+    }
+}
+
+impl App {
+    /// The pointer is over the Video registration stage scatter.
+    fn scatter_hovered(&self) -> bool {
+        self.workflow == registration::Workflow::Registration && self.reg.as_ref().is_some_and(|r| r.scatter_hovered)
     }
 }
 

@@ -135,6 +135,8 @@ pub struct Registration {
     matches: HashMap<String, (String, Rc<RunMatch>)>,
     /// Stage scatter zoom and pan (points), for the session it was set in.
     scatter_view: (usize, f32, egui::Vec2),
+    /// The pointer is over the stage scatter (last frame): Home and ⌘= / ⌘− / ⌘0 act on it, not the map.
+    pub scatter_hovered: bool,
     /// Position -> the run last selected there, kept on the map once the position is
     /// deselected so its (per-run) nudge does not appear to jump back.
     last_run: HashMap<usize, usize>,
@@ -167,8 +169,23 @@ impl Registration {
             video_edge: None,
             matches: HashMap::new(),
             scatter_view: (0, 1.0, egui::Vec2::ZERO),
+            scatter_hovered: false,
             last_run: HashMap::new(),
         }
+    }
+
+    /// Keyboard zoom of the stage scatter about its centre; `factor` as the map's `zoom_keyboard`
+    /// (< 1 zooms in).
+    pub fn scatter_zoom(&mut self, factor: f32) {
+        let (_, zoom, pan) = &mut self.scatter_view;
+        let new_zoom = (*zoom / factor).clamp(1.0, 200.0);
+        *pan *= new_zoom / *zoom;
+        *zoom = new_zoom;
+    }
+
+    /// Back to the whole session in view (the scatter's "fit").
+    pub fn scatter_reset(&mut self) {
+        self.scatter_view = (self.session, 1.0, egui::Vec2::ZERO);
     }
 
     /// Takes the author's registration layer as the current state (anchors by position).

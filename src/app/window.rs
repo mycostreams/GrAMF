@@ -86,6 +86,10 @@ impl ApplicationHandler for App {
             return;
         };
 
+        // Space + drag inside a panel (the stage scatter pans that way) is a pan, not a play tap.
+        if self.space_held && gui_state.egui_ctx().dragged_id().is_some() {
+            self.space_panned = true;
+        }
         // Pass the event to the GUI state for handling, and if it was consumed, return early
         if gui_state.on_window_event(window, &event).consumed {
             return;
@@ -125,7 +129,14 @@ impl ApplicationHandler for App {
                         timeline.toggle_play();
                     }
                 }
-                (winit::keyboard::KeyCode::Home, ElementState::Pressed) => renderer.fit(),
+                (winit::keyboard::KeyCode::Home, ElementState::Pressed) => {
+                    let scatter = self.workflow == registration::Workflow::Registration
+                        && self.reg.as_ref().is_some_and(|r| r.scatter_hovered);
+                    match self.reg.as_mut() {
+                        Some(reg) if scatter => reg.scatter_reset(),
+                        _ => renderer.fit(),
+                    }
+                }
                 // Video registration: left / right switch between the selected position's runs
                 (key @ (winit::keyboard::KeyCode::ArrowLeft | winit::keyboard::KeyCode::ArrowRight), ElementState::Pressed)
                     if self.workflow == registration::Workflow::Registration
