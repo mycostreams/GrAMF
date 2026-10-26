@@ -257,6 +257,12 @@ impl App {
         // otherwise the one last loaded is kept.
         let mut flow_note = String::new();
         if let (Some(reg), Some(store), Some(st)) = (self.reg.as_mut(), self.store.as_ref(), self.annot.as_mut()) {
+            // Record the factor the runs were placed with, also when it only came from the setup
+            // default: a file left unset would reopen at whatever the default is by then.
+            if st.own.registration.video_scale.is_none() {
+                st.own.registration.video_scale = Some(reg.video_scale());
+                reg.layer.video_scale = st.own.registration.video_scale;
+            }
             let added = added_segments(store, Some(&*st));
             let (flow, sessions, runs, missing) = registration::flow_output(reg, store, &added);
             flow_note = format!(" · flow: {sessions} verified sessions, {runs} runs, {} measurements", flow.measurements.len());

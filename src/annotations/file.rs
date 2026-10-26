@@ -96,6 +96,7 @@ fn write_file(a: &Annotations, path: &Path, trail_paths: &BTreeMap<String, Vec<i
         attr_i("n_anchors", flow.n_anchors)?;
         attr_i("n_pins", flow.n_pins)?;
         m.new_attr::<f64>().shape(()).create("cutoff_um")?.as_writer().write_scalar(&(flow.cutoff_um as f64))?;
+        m.new_attr::<f64>().shape(()).create("video_scale")?.as_writer().write_scalar(&(flow.video_scale as f64))?;
         for (name, value) in [("backbone_fingerprint", a.fingerprint.as_str()), ("written_by", "GrAMF")] {
             m.new_attr::<VarLenUnicode>().shape(()).create(name)?.as_writer().write_scalar(&vlu(value))?;
         }
@@ -263,6 +264,8 @@ fn read_file(path: &Path) -> hdf5_metno::Result<Annotations> {
             cutoff_um: m.attr("cutoff_um").and_then(|x| x.read_scalar::<f64>()).unwrap_or(f64::NAN) as f32,
             n_anchors: attr_i("n_anchors"),
             n_pins: attr_i("n_pins"),
+            // absent in layers written before the factor was recorded
+            video_scale: m.attr("video_scale").and_then(|x| x.read_scalar::<f64>()).unwrap_or(f64::NAN) as f32,
         });
     }
     // Optional: files written before trails existed have no /trails.

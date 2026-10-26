@@ -283,6 +283,9 @@ lines of real logic and ~1,700 of UI. GrAMF does **not** port its workflow one-t
   ~1146 µm/mm, i.e. the STG reads ~1.15x long against MORRISON stage mm and 0.138 µm/px videos.
   "Set from fit scale" sets it to the session's fit scale / 1000 (2+ anchors). The session's own
   scale still only spaces positions; this factor is the only thing that resizes videos.
+  Saving always writes the effective value, including when it only came from the setup default,
+  so a registration reopens at the factor it was placed with. The flow layer (annotation file and
+  published store) carries it as the `/flow_measurements` attr `video_scale`.
 - **Camera orientation** (video image axes vs stage axes) is part of the setup default, found
   once by trying the 8 rotation/mirror options and keeping the best overlap with the STG.
 - **Sessions**: runs grouped by position's first-run time, new session when the gap exceeds

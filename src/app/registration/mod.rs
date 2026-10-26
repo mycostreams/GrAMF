@@ -448,6 +448,7 @@ pub fn flow_output(reg: &mut Registration, store: &Store, added: &[AddedSegment]
         cutoff_um: reg.threshold(),
         n_anchors: reg.layer.anchors.len() as i64,
         n_pins: reg.layer.assignments.len() as i64,
+        video_scale: reg.video_scale(),
         ..Default::default()
     };
     let (mut sessions, mut missing) = (0, vec![]);
