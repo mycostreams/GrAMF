@@ -58,6 +58,7 @@ pub fn left_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, store: &Sto
             ui.label(egui::RichText::new(text).small().weak());
         };
         dot(ui, ANCHORED, "anchored");
+        dot(ui, NUDGED, "nudged");
         dot(ui, PLACED, "placed");
         dot(ui, UNPLACED, "not placed");
         dot(ui, MAPPED, "mapped in store");
@@ -257,8 +258,11 @@ fn scatter(ui: &mut egui::Ui, reg: &mut Registration, fits: &[Option<SessionFit>
         if !rect.expand(8.0).contains(at) {
             continue;
         }
+        // an anchor outranks a nudge: the anchor already says this position was placed by hand
         let colour = if reg.anchors.contains_key(&p) {
             ANCHORED
+        } else if reg.position_nudged(p) {
+            NUDGED
         } else if fits.get(reg.session).is_some_and(|f| f.is_some()) {
             PLACED
         } else {
