@@ -67,7 +67,7 @@ pub struct App {
     settings: crate::settings::Settings,
     settings_window: settings_window::SettingsWindow,
     workflow: registration::Workflow,
-    /// The open plate's video runs (Video registration workflow), when found.
+    /// The open plate's video runs (Video registration workflow), once the user has chosen their folder.
     reg: Option<registration::Registration>,
     /// Routed trails per (author, name): the waypoints and added-edge count they were routed
     /// with, and the node path (`None`: no path).

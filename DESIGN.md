@@ -247,11 +247,14 @@ lines of real logic and ~1,700 of UI. GrAMF does **not** port its workflow one-t
 
 ### Inputs
 
-- A plate's `polyflow_analysis/<position>/<YYYYMMDD_HHMMSS>/` run folders, each with
+- A plate's `<runs folder>/<position>/<YYYYMMDD_HHMMSS>/` run folders, each with
   `run_metadata.json`, `extraction_graph.json` and `flow_analysis.parquet` (a run needs the
   first and the last). From the metadata: `date_time`, `mode`, `run_nr` (may be null),
   `deltas.delta_x` (µm/px), `camera.frame_size`, `camera.model` (incl. `SN:`) and
   `position.x/y` (stage mm; the folder name `x_n10_38_y_4_484` is only the fallback).
+  The runs folder (`polyflow_analysis` on Snellius, `polyflow_data` or `polyflow_data_walls_v4` in
+  Dropbox sessions) is always chosen by the user. It is never looked up beside the store, because
+  a plate can carry several run sets and a guessed one would be published unnoticed.
 - Video graph: `extraction_graph.json` edges `[u, v, k]` with `pixel_list`; node positions in µm
   relative to the frame centre (`(pixel - frame_size/2) * delta_x`). Flow values per edge and
   direction from the parquet: `median, perc_25, perc_75, flux_ratio, coverage, pixel_count,

@@ -13,7 +13,7 @@ pub fn left_panel(ui: &mut egui::Ui, reg: Option<&mut Registration>, store: &Sto
     let mut action = Action::None;
     ui.heading("Video runs");
     let Some(reg) = reg else {
-        ui.label(egui::RichText::new("No polyflow_analysis or polyflow_data folder found beside the store.").weak());
+        ui.label(egui::RichText::new("Choose the folder with this plate's video runs.").weak());
         if ui.button("Choose video runs folder…").clicked() {
             action = Action::ChooseFolder;
         }

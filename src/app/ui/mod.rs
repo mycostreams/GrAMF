@@ -99,7 +99,7 @@ pub struct FrameState<'a> {
     pub workflow: &'a mut Workflow,
     /// The user's added edges as segments, for matching video edges onto them.
     pub added_segments: &'a [crate::video::matching::AddedSegment],
-    /// The plate's video runs, when found.
+    /// The plate's video runs, once their folder is chosen.
     pub reg: Option<&'a mut Registration>,
 }
 
