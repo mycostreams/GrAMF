@@ -65,6 +65,8 @@ const MAPPED: Color32 = Color32::from_rgb(29, 158, 117);
 const ANCHORED: Color32 = Color32::from_rgb(55, 138, 221);
 const PLACED: Color32 = Color32::from_rgb(210, 210, 205);
 const UNPLACED: Color32 = Color32::from_rgb(136, 135, 128);
+/// A position with at least one hand-nudged run (stage scatter).
+const NUDGED: Color32 = Color32::from_rgb(232, 135, 50);
 
 /// Distinct colours for a run's video edges (and their STG chains).
 pub const EDGE_COLOURS: [Color32; 8] = [
@@ -420,6 +422,11 @@ impl Registration {
         p.runs.get(self.run).map(|r| r.utc)
     }
 
+    /// At least one of position `p`'s runs carries a hand nudge (not the automatic snap).
+    fn position_nudged(&self, p: usize) -> bool {
+        self.videos.positions[p].runs.iter().any(|r| self.layer.nudges.get(&r.rel_path).is_some_and(|n| *n != [0.0; 2]))
+    }
+
     fn position_mapped(&self, p: usize) -> bool {
         self.videos.positions[p].runs.iter().any(|r| self.mapped_in_store.contains(&r.rel_path))
     }
@@ -621,5 +628,14 @@ mod tests {
         // the panel's live view agrees
         assert_eq!(reg.runs_without_flow(&store, &[]), vec![(0, 1)]);
         assert_eq!((reg.chained_edges(0, 0, &store, &[]), reg.chained_edges(0, 1, &store, &[])), (Some(1), Some(0)));
+
+        // stage scatter: a position counts as nudged once any of its runs carries a non-zero nudge
+        assert!(!reg.position_nudged(0));
+        layer.nudges.insert("p/off".into(), [0.0, 0.0]);
+        reg.sync(&layer);
+        assert!(!reg.position_nudged(0), "a zero nudge is no nudge");
+        layer.nudges.insert("p/off".into(), [3.0, -2.0]);
+        reg.sync(&layer);
+        assert!(reg.position_nudged(0));
     }
 }
