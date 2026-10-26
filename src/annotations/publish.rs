@@ -79,6 +79,7 @@ fn publish_into(a: &Annotations, flow: &FlowOutput, path: &Path, n_edges: usize,
     m.new_attr::<f64>().shape(()).create("cutoff_um")?.as_writer().write_scalar(&(flow.cutoff_um as f64))?;
     attr_i(&m, "n_anchors", flow.n_anchors)?;
     attr_i(&m, "n_pins", flow.n_pins)?;
+    m.new_attr::<f64>().shape(()).create("video_scale")?.as_writer().write_scalar(&(flow.video_scale as f64))?;
     attr_s(&m, "written_by", "GrAMF")?;
 
     let names: Vec<VarLenUnicode> = a.trails.keys().map(|n| vlu(n)).collect();

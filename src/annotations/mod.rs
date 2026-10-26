@@ -73,6 +73,9 @@ pub struct FlowOutput {
     pub cutoff_um: f32,
     pub n_anchors: i64,
     pub n_pins: i64,
+    /// STG µm per video µm the runs were placed with (`/flow_measurements` attr
+    /// `video_scale`); NaN when read from a layer written before it was recorded.
+    pub video_scale: f32,
 }
 
 #[derive(hdf5_metno::H5Type, Clone, Debug)]
@@ -397,7 +400,7 @@ mod tests {
             s_start_um: 3.0, s_end_um: 40.0,
         };
         let run = FlowRunRow { run_path: vlu("pos/run"), mode: vlu("brightfield"), run_nr: -1, video_epoch_s: 1.0, frame_timestamp: 2.0 };
-        a.flow = Some(FlowOutput { runs: vec![run], measurements: vec![m(4), m(ADDED_EDGE_ID_START)], cutoff_um: 8.0, n_anchors: 2, n_pins: 0 });
+        a.flow = Some(FlowOutput { runs: vec![run], measurements: vec![m(4), m(ADDED_EDGE_ID_START)], cutoff_um: 8.0, n_anchors: 2, n_pins: 0, video_scale: 1.1 });
         let paths = BTreeMap::from([("main".to_string(), vec![1, 5, 2])]);
 
         let p = publish::publish_with_backup(&a, &store, 10, &paths, "bak1").unwrap();
@@ -412,6 +415,8 @@ mod tests {
         assert_eq!(f.dataset("root_nodes").unwrap().read_raw::<i64>().unwrap(), [3]);
         assert_eq!(f.dataset("flow_trails_nodes").unwrap().read_raw::<i64>().unwrap(), [1, 5, 2]);
         assert_eq!(f.dataset("flow_measurements").unwrap().read_raw::<FlowMeasurementRow>().unwrap()[0].edge_id, 4);
+        let scale = f.dataset("flow_measurements").unwrap().attr("video_scale").unwrap().read_scalar::<f64>().unwrap();
+        assert!((scale - 1.1).abs() < 1e-6, "{scale}");
         drop(f);
 
         a.fingerprint = "changed".into();
@@ -464,6 +469,7 @@ mod tests {
                 s_start_um: 12.5, s_end_um: 140.0,
             }],
             cutoff_um: 12.5,
+            video_scale: 1.1458,
             n_anchors: 1,
             n_pins: 1,
         });
@@ -487,6 +493,7 @@ mod tests {
         let flow = b.flow.as_ref().unwrap();
         assert_eq!((flow.runs.len(), flow.measurements[0].edge_id, flow.measurements[0].direction), (1, 23158, -1));
         assert_eq!((flow.measurements[0].s_start_um, flow.measurements[0].s_end_um), (12.5, 140.0));
+        assert_eq!(flow.video_scale, 1.1458);
         assert_eq!(b.registration.video_scale, Some(1.1458));
         assert_eq!(b.history.len(), 14);
         assert!(!b.dirty);
