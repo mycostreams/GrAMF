@@ -119,11 +119,13 @@ fn least_squares(anchors: &[([f64; 2], [f64; 2])], mirror: bool) -> Similarity {
 }
 
 /// Where a video-graph point (µm from the frame centre, camera axes) lands on the STG for a
-/// video filmed at `stage` mm: the camera turned into stage axes, then the session's rotation
-/// and mirror (no scale: video points are already µm).
-pub fn place(sim: &Similarity, camera: u8, stage: [f64; 2], p_um: [f32; 2]) -> [f32; 2] {
+/// video filmed at `stage` mm: scaled by `video_scale` (STG µm per video µm, 1 when the
+/// network's pixel size is right), the camera turned into stage axes, then the session's
+/// rotation and mirror. The session's own scale only spaces positions; it never resizes videos.
+pub fn place(sim: &Similarity, camera: u8, video_scale: f32, stage: [f64; 2], p_um: [f32; 2]) -> [f32; 2] {
     let centre = sim.apply(stage);
-    let o = sim.orient(camera_orient(camera, [p_um[0] as f64, p_um[1] as f64]));
+    let k = video_scale as f64;
+    let o = sim.orient(camera_orient(camera, [p_um[0] as f64 * k, p_um[1] as f64 * k]));
     [(centre[0] + o[0]) as f32, (centre[1] + o[1]) as f32]
 }
 
@@ -190,5 +192,19 @@ mod tests {
         }
         assert_eq!(camera_orient(1, v), [-2.0, 1.0]);
         assert_eq!(camera_orient(4, v), [1.0, -2.0]);
+    }
+
+    #[test]
+    fn video_scale_scales_about_the_frame_centre() {
+        let sim = Similarity { scale: 1146.0, theta: 0.3, mirror: true, t: [5.0, -7.0] };
+        let stage = [-3.271, -3.167];
+        let centre = place(&sim, 5, 1.0, stage, [0.0, 0.0]);
+        // the frame centre does not move with the factor
+        assert_eq!(place(&sim, 5, 1.1458, stage, [0.0, 0.0]), centre);
+        // a point 100 µm out lands 114.58 µm out, in the same direction
+        let (a, b) = (place(&sim, 5, 1.0, stage, [100.0, 0.0]), place(&sim, 5, 1.1458, stage, [100.0, 0.0]));
+        let d = |p: [f32; 2]| ((p[0] - centre[0]).hypot(p[1] - centre[1]), (p[1] - centre[1]).atan2(p[0] - centre[0]));
+        let ((ra, ta), (rb, tb)) = (d(a), d(b));
+        assert!((ra - 100.0).abs() < 1e-2 && (rb - 114.58).abs() < 1e-2 && (ta - tb).abs() < 1e-5, "{ra} {rb} {ta} {tb}");
     }
 }

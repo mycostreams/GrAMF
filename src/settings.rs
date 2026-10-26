@@ -10,6 +10,9 @@ pub struct SetupDefault {
     pub transform: Similarity,
     /// `placement::camera_orient` option, 0-7.
     pub camera: u8,
+    /// STG µm per video µm: corrects a network imaged at a pixel size other than the one
+    /// its store was built with (PRINCE at nominal 2x). 1 when the two agree.
+    pub video_scale: f32,
 }
 
 /// ARETHA's built-in default, fitted from FLW2605A003's six registrator anchors (residuals
@@ -18,6 +21,7 @@ pub struct SetupDefault {
 const ARETHA_SEED: SetupDefault = SetupDefault {
     transform: Similarity { scale: 1008.137, theta: 0.015065, mirror: true, t: [41650.42, 42469.49] },
     camera: 3,
+    video_scale: 1.0,
 };
 
 #[derive(Clone, PartialEq, Debug)]
@@ -99,10 +103,15 @@ impl Settings {
                 "registry_dir" if !value.is_empty() => s.registry_dir = PathBuf::from(value),
                 k if k.starts_with("setup.") => {
                     let f: Vec<f64> = value.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-                    if let [scale, theta, mirror, tx, ty, camera] = f[..] {
+                    // a 7th value (video scale) is optional: older settings files have six
+                    let (vals, video_scale) = match f[..] {
+                        [.., v] if f.len() == 7 && v > 0.0 => (&f[..6], v as f32),
+                        _ => (&f[..f.len().min(6)], 1.0),
+                    };
+                    if let [scale, theta, mirror, tx, ty, camera] = vals[..] {
                         let transform = Similarity { scale, theta, mirror: mirror != 0.0, t: [tx, ty] };
                         let camera = (camera as u8).min(7);
-                        s.setup_defaults.insert(k["setup.".len()..].to_string(), SetupDefault { transform, camera });
+                        s.setup_defaults.insert(k["setup.".len()..].to_string(), SetupDefault { transform, camera, video_scale });
                     }
                 }
                 "session_gap_minutes" => {
@@ -123,12 +132,12 @@ impl Settings {
             self.registry_dir.display(),
             self.session_gap_minutes
         );
-        text += "# setup.<name> = scale (um/mm), theta (rad), mirror (0/1), tx, ty (um), camera (0-7)\n";
+        text += "# setup.<name> = scale (um/mm), theta (rad), mirror (0/1), tx, ty (um), camera (0-7), video scale (STG um per video um)\n";
         for (name, d) in &self.setup_defaults {
             let t = d.transform;
             text += &format!(
-                "setup.{name} = {}, {}, {}, {}, {}, {}\n",
-                t.scale, t.theta, t.mirror as u8, t.t[0], t.t[1], d.camera
+                "setup.{name} = {}, {}, {}, {}, {}, {}, {}\n",
+                t.scale, t.theta, t.mirror as u8, t.t[0], t.t[1], d.camera, d.video_scale
             );
         }
         text
@@ -154,9 +163,12 @@ mod tests {
         };
         s.setup_defaults.insert(
             "MORRISON".into(),
-            super::SetupDefault { transform: Similarity { scale: 995.5, theta: -0.25, mirror: false, t: [1.5, -2.0] }, camera: 6 },
+            super::SetupDefault { transform: Similarity { scale: 995.5, theta: -0.25, mirror: false, t: [1.5, -2.0] }, camera: 6, video_scale: 1.1458 },
         );
         assert_eq!(Settings::parse(&s.to_text()), s);
+        // a six-value line from before the video scale existed reads as scale 1
+        let old = Settings::parse("setup.MORRISON = 1000, 0, 0, 0, 0, 5\n");
+        assert_eq!(old.setup_default("MORRISON").map(|d| (d.camera, d.video_scale)), Some((5, 1.0)));
         let t = Settings::parse("author = Ann a./\nsession_gap_minutes = soon\nnonsense\n");
         assert_eq!(t.author, "Anna");
         assert_eq!(t.session_gap_minutes, 15.0);

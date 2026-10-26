@@ -76,9 +76,10 @@ impl App {
         }
         if save {
             let name = reg.videos.setup.name();
-            let default = crate::settings::SetupDefault { transform: fit.sim, camera: reg.camera() };
+            let default = crate::settings::SetupDefault { transform: fit.sim, camera: reg.camera(), video_scale: reg.video_scale() };
             self.settings.setup_defaults.insert(name.clone(), default);
             reg.default = Some(fit.sim);
+            reg.default_video_scale = reg.video_scale();
             self.status = match self.settings.save() {
                 Ok(()) => format!("Saved this session's placement as the {name} default"),
                 Err(e) => format!("Could not save settings: {e}"),

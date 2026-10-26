@@ -119,6 +119,7 @@ fn write_registration(f: &hdf5_metno::File, r: &RegistrationLayer, ints: &Ints, 
     attr_f("camera", r.camera.map_or(-1.0, f64::from))?;
     attr_f("threshold_um", r.threshold_um.map_or(f64::NAN, f64::from))?;
     attr_f("snap", r.snap.map_or(-1.0, |s| s as u8 as f64))?;
+    attr_f("video_scale", r.video_scale.map_or(f64::NAN, f64::from))?;
 
     let a = g.create_group("anchors")?;
     strs(&a, "position", &r.anchors.keys().cloned().collect::<Vec<_>>())?;
@@ -176,6 +177,8 @@ fn read_registration(g: &hdf5_metno::Group) -> hdf5_metno::Result<RegistrationLa
         camera: Some(attr("camera")).filter(|c| *c >= 0.0).map(|c| c as u8),
         threshold_um: Some(attr("threshold_um")).filter(|t| t.is_finite()).map(|t| t as f32),
         snap: Some(attr("snap")).filter(|s| *s >= 0.0).map(|s| s != 0.0),
+        // absent in files from before the calibration existed: NaN -> None
+        video_scale: Some(attr("video_scale")).filter(|v| v.is_finite() && *v > 0.0).map(|v| v as f32),
         ..Default::default()
     };
     let (names, xs, ys) = (strs("anchors/position")?, floats("anchors/x_um")?, floats("anchors/y_um")?);

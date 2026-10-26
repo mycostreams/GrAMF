@@ -131,6 +131,26 @@ fn session_details(ui: &mut egui::Ui, reg: &mut Registration, fit: &SessionFit, 
         if ui.checkbox(&mut verified, "Verified").on_hover_text("you checked that these videos sit on the right hyphae").changed() {
             reg.pending.push(Op::SetVerified(key, verified));
         }
+        // Network-scale calibration: video graphs are true µm, the STG is in the µm its pixel
+        // size made it (PRINCE at nominal 2x reads about 1.15x long).
+        let explain = "STG µm per video µm. Scales every video graph and frame about its centre. \
+            Corrects a network whose pixel size is mis-calibrated (the session's fit scale / 1000 when \
+            the stage and the videos are right). Saved with the registration and with the setup default.";
+        let mut k = reg.video_scale();
+        ui.horizontal(|ui| {
+            ui.label("video scale").on_hover_text(explain);
+            if ui.add(egui::DragValue::new(&mut k).speed(0.001).range(0.5..=2.0).fixed_decimals(4)).on_hover_text(explain).changed() {
+                reg.pending.push(Op::SetVideoScale(Some(k)));
+            }
+        });
+        let from_fit = (fit.sim.scale / 1000.0) as f32;
+        if ui
+            .add_enabled(fit.residuals.len() >= 2, egui::Button::new(format!("Set from fit scale ({from_fit:.4})")).small())
+            .on_hover_text("video scale = this session's fit scale / 1000 (needs 2 or more anchors)")
+            .clicked()
+        {
+            reg.pending.push(Op::SetVideoScale(Some(from_fit)));
+        }
         // stacked, not side by side: a wide row would widen the whole panel
         ui.vertical(|ui| {
             if ui.small_button("Detect camera orientation").on_hover_text("tries the 8 rotations / mirrors of the camera and keeps the best fit").clicked() {
