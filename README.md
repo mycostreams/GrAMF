@@ -63,6 +63,8 @@ you click and are saved with your annotations.
 **Video registration**: the second workflow button lists the plate's video runs from the folder you
 choose (`<position>/<timestamp>/` run folders; GrAMF never guesses one), grouped
 into sessions, with a stage scatter and a run slider that moves the STG to the run's time.
+The stage scatter navigates like the map while the pointer is over it: scroll pans (Shift: sideways),
+⌥/⌘ + scroll or pinch zooms, drag or Space + drag pans, ⌘= / ⌘− zoom, Home / ⌘0 or a double-click fit.
 Place a session, nudge runs onto the graph, then press **Publish to store…** in the registration panel.
 When the network's pixel size is off (video graphs too small or large against the STG), set the
 session's **video scale** (STG µm per video µm), e.g. with **Set from fit scale** once 2+ anchors
