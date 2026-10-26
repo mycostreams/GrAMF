@@ -53,6 +53,9 @@ pub struct RegistrationLayer {
     pub camera: Option<u8>,
     pub threshold_um: Option<f32>,
     pub snap: Option<bool>,
+    /// STG µm per video µm, the setup's network-scale calibration this registration used;
+    /// `None` (files from before it existed): the setup default, else 1.
+    pub video_scale: Option<f32>,
 }
 
 impl RegistrationLayer {
@@ -127,6 +130,8 @@ pub enum Op {
     SetDisabled(RunEdge, bool),
     /// Camera orientation, threshold (µm), snap.
     SetRegistrationParams(Option<u8>, Option<f32>, Option<bool>),
+    /// STG µm per video µm.
+    SetVideoScale(Option<f32>),
 }
 
 impl Op {
@@ -150,6 +155,7 @@ impl Op {
             Op::SetAssignment((r, k), c) => format!("set_assignment run={r:?} video_edge={k:?} chain={c:?}"),
             Op::SetDisabled((r, k), v) => format!("set_disabled run={r:?} video_edge={k:?} value={v}"),
             Op::SetRegistrationParams(c, t, s) => format!("set_registration camera={c:?} threshold_um={t:?} snap={s:?}"),
+            Op::SetVideoScale(v) => format!("set_video_scale value={v:?}"),
         }
     }
 }
@@ -283,6 +289,7 @@ impl Annotations {
                 (r.camera, r.threshold_um, r.snap) = (c, t, s);
                 was
             }
+            Op::SetVideoScale(v) => Op::SetVideoScale(std::mem::replace(&mut self.registration.video_scale, v)),
         }
     }
 
@@ -447,6 +454,7 @@ mod tests {
         a.edit(Op::SetAssignment(run_edge.clone(), Some(vec![(EdgeRef::Pipeline(23158), 1), (EdgeRef::Added(1_000_000), -1)])));
         a.edit(Op::SetDisabled(("pos/20260609_150109".to_string(), [2, 1, 0]), true));
         a.edit(Op::SetRegistrationParams(Some(3), Some(12.5), Some(false)));
+        a.edit(Op::SetVideoScale(Some(1.1458)));
         let row = |s: &str| VarLenUnicode::from_str(s).unwrap();
         a.flow = Some(FlowOutput {
             runs: vec![FlowRunRow { run_path: row("pos/20260609_150109"), mode: row("brightfield"), run_nr: -1, video_epoch_s: 1.0, frame_timestamp: 2.0 }],
@@ -479,7 +487,8 @@ mod tests {
         let flow = b.flow.as_ref().unwrap();
         assert_eq!((flow.runs.len(), flow.measurements[0].edge_id, flow.measurements[0].direction), (1, 23158, -1));
         assert_eq!((flow.measurements[0].s_start_um, flow.measurements[0].s_end_um), (12.5, 140.0));
-        assert_eq!(b.history.len(), 13);
+        assert_eq!(b.registration.video_scale, Some(1.1458));
+        assert_eq!(b.history.len(), 14);
         assert!(!b.dirty);
     }
 

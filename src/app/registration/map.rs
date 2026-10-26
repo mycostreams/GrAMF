@@ -11,9 +11,9 @@ fn frame_world(reg: &mut Registration, p: usize, run: usize, sim: &Similarity, s
     let m = reg.run_match(p, run, sim, store, added)?;
     let pos = &reg.videos.positions[p];
     let (stage, frame, dx) = (pos.stage_mm, pos.runs[run].frame_size, pos.runs[run].delta_x_um);
-    let (camera, rigid) = (reg.camera(), m.snap.unwrap_or_default());
+    let (camera, video_scale, rigid) = (reg.camera(), reg.video_scale(), m.snap.unwrap_or_default());
     let place = |q: [f32; 2]| {
-        let w = placement::place(sim, camera, stage, q);
+        let w = placement::place(sim, camera, video_scale, stage, q);
         rigid.apply([w[0] + m.nudge[0], w[1] + m.nudge[1]])
     };
     let (hw, hh) = (frame[1] as f32 * dx / 2.0, frame[0] as f32 * dx / 2.0);

@@ -64,6 +64,9 @@ you click and are saved with your annotations.
 choose (`<position>/<timestamp>/` run folders; GrAMF never guesses one), grouped
 into sessions, with a stage scatter and a run slider that moves the STG to the run's time.
 Place a session, nudge runs onto the graph, then press **Publish to store…** in the registration panel.
+When the network's pixel size is off (video graphs too small or large against the STG), set the
+session's **video scale** (STG µm per video µm), e.g. with **Set from fit scale** once 2+ anchors
+are placed; **Save as <setup> default** keeps it for the next plate.
 
 Settings (⌘, on macOS, File > Settings… elsewhere) hold your author name, the plate registry
 folder and the video-registration session gap; they live in `~/.gramf/settings`.

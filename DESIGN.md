@@ -273,6 +273,14 @@ lines of real logic and ~1,700 of UI. GrAMF does **not** port its workflow one-t
   offset), because plate imaging and videos share one machine. MORRISON: default scale only;
   rotation and mirror from anchors, because the plate is imaged elsewhere (PRINCE).
   Stage scale is ~1000 µm/mm; the video's own scale is `deltas.delta_x`.
+- **Video scale** (STG µm per video µm, default 1) is part of the setup default and is saved with
+  each registration (`/registration` attr `video_scale`; older files read as unset, which means
+  the setup default, else 1). It scales every video graph and frame about the frame centre before
+  placement. It exists because a store is in whatever µm its network pixel size made: PRINCE
+  stores are built at the nominal 1.725 µm/px (3.45 µm / 2x), and EPY2412A088 fits at
+  ~1146 µm/mm, i.e. the STG reads ~1.15x long against MORRISON stage mm and 0.138 µm/px videos.
+  "Set from fit scale" sets it to the session's fit scale / 1000 (2+ anchors). The session's own
+  scale still only spaces positions; this factor is the only thing that resizes videos.
 - **Camera orientation** (video image axes vs stage axes) is part of the setup default, found
   once by trying the 8 rotation/mirror options and keeping the best overlap with the STG.
 - **Sessions**: runs grouped by position's first-run time, new session when the gap exceeds

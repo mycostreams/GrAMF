@@ -115,6 +115,8 @@ pub struct Registration {
     pub anchors: BTreeMap<usize, [f64; 2]>,
     /// The setup default's camera orientation, used until the layer sets one.
     default_camera: u8,
+    /// The setup default's video scale (STG µm per video µm), used until the layer sets one.
+    pub default_video_scale: f32,
     /// A nudge being dragged (µm), shown live on the selected run before it is committed.
     pub drag_nudge: Option<[f32; 2]>,
     /// What "Copy corrections from previous run" did last, and for which run.
@@ -157,6 +159,7 @@ impl Registration {
             pending: vec![],
             anchors: BTreeMap::new(),
             default_camera: default.map_or(0, |d| d.camera),
+            default_video_scale: default.map_or(1.0, |d| d.video_scale),
             drag_nudge: None,
             copied_note: None,
             default: default.map(|d| d.transform),
@@ -190,6 +193,11 @@ impl Registration {
         self.layer.camera.unwrap_or(self.default_camera)
     }
 
+    /// STG µm per video µm (DESIGN.md §10): the registration's own value, else the setup's.
+    pub fn video_scale(&self) -> f32 {
+        self.layer.video_scale.unwrap_or(self.default_video_scale)
+    }
+
     /// Distance (µm) within which a video edge counts as lying on an STG edge.
     pub fn threshold(&self) -> f32 {
         self.layer.threshold_um.unwrap_or(10.0)
@@ -217,8 +225,9 @@ impl Registration {
         let assignments: Vec<_> = self.layer.assignments.iter().filter(|(k, _)| k.0 == rel).collect();
         let disabled: Vec<_> = self.layer.disabled.iter().filter(|k| k.0 == rel).collect();
         let key = format!(
-            "{sim:?}/{}/{}/{}/{}/{nudge:?}/{assignments:?}/{disabled:?}",
+            "{sim:?}/{}/{}/{}/{}/{}/{nudge:?}/{assignments:?}/{disabled:?}",
             self.camera(),
+            self.video_scale(),
             self.threshold(),
             self.snap(),
             added.len()
@@ -230,6 +239,7 @@ impl Registration {
         }
         let graph = self.graph(p, run)?;
         let stage = self.videos.positions[p].stage_mm;
+        let video_scale = self.video_scale();
         let raw: Vec<Vec<[f32; 2]>> = graph
             .edges
             .iter()
@@ -237,7 +247,7 @@ impl Registration {
                 e.points
                     .iter()
                     .map(|&q| {
-                        let w = placement::place(sim, self.camera(), stage, q);
+                        let w = placement::place(sim, self.camera(), video_scale, stage, q);
                         [w[0] + nudge[0], w[1] + nudge[1]]
                     })
                     .collect()
@@ -337,11 +347,12 @@ impl Registration {
     fn placed_samples(&mut self, i: usize, sim: &Similarity, camera: u8) -> Vec<[f32; 2]> {
         let positions = self.sessions[i].positions.clone();
         let mut out = vec![];
+        let video_scale = self.video_scale();
         for p in positions {
             let stage = self.videos.positions[p].stage_mm;
             if let Some(g) = self.graph(p, self.shown_run(p)) {
                 for e in &g.edges {
-                    out.extend(e.points.iter().step_by(5).map(|&q| placement::place(sim, camera, stage, q)));
+                    out.extend(e.points.iter().step_by(5).map(|&q| placement::place(sim, camera, video_scale, stage, q)));
                 }
             }
         }
@@ -351,7 +362,7 @@ impl Registration {
     /// Fit score of session `i` (mean capped distance of its placed videos to the STG),
     /// recomputed only when its transform or the camera changed.
     pub fn score(&mut self, i: usize, fit: &SessionFit, store: &Store) -> Option<f32> {
-        let key = format!("{:?}/{}/{:?}", fit.sim, self.camera(), self.selected_run_utc());
+        let key = format!("{:?}/{}/{}/{:?}", fit.sim, self.camera(), self.video_scale(), self.selected_run_utc());
         if let Some((k, s)) = self.scores.get(&i) {
             if *k == key {
                 return *s;
