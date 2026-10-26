@@ -86,13 +86,14 @@ impl App {
         }
     }
 
-    /// Asks for a `polyflow_analysis` folder and lists its runs.
+    /// Asks for the folder with the plate's video runs (`<position>/<timestamp>/` run folders) and
+    /// lists its runs.
     pub(super) fn choose_videos(&mut self) {
         let Some(store) = self.store.as_ref() else {
             return;
         };
         let start = self.store_path.as_ref().and_then(|p| p.parent()).map(Path::to_path_buf);
-        let mut dialog = rfd::FileDialog::new().set_title("Folder with the plate's video runs (polyflow_analysis)");
+        let mut dialog = rfd::FileDialog::new().set_title("Choose the folder with this plate's video runs");
         if let Some(dir) = start {
             dialog = dialog.set_directory(dir);
         }
@@ -192,19 +193,10 @@ impl App {
         }
         self.annot = Some(annot);
         self.store_path = Some(path.to_path_buf());
-        // Video runs beside the store (or one folder up, for <plate>/data/stg_store.h5), named
-        // polyflow_analysis (registrator) or polyflow_data (paper_plates sessions).
-        self.reg = path
-            .ancestors()
-            .skip(1)
-            .take(2)
-            .flat_map(|dir| [dir.join("polyflow_analysis"), dir.join("polyflow_data")])
-            .find(|dir| dir.is_dir())
-            .and_then(|dir| crate::video::runs::scan(&dir).ok())
-            .map(|videos| {
-                let default = self.settings.setup_default(&videos.setup.name());
-                registration::Registration::new(videos, self.settings.session_gap_minutes, &store, default)
-            });
+        // The video runs folder is always the user's choice (choose_videos): a plate can hold
+        // several run sets (e.g. polyflow_data and polyflow_data_walls_v4), and a guessed one
+        // would be registered and published without anyone noticing.
+        self.reg = None;
         self.store = Some(store);
         self.dev.timings.annotations_ms = ms(started);
     }
