@@ -18,7 +18,7 @@ on Publish, the store's flow layer. See
 - per-author annotation files `annotations.<author>.h5` (exclude, merge duplicates, roots,
   added edges, trails, notes, hyperedge overrides) with undo/redo;
 - video registration: places the plate's flow runs on the STG and matches them to its edges;
-- **Publish to store** writes the flow layer, trails and roots into the store, after keeping
+- **Publish to store** writes the flow layer, trails, roots and your added edges (`/added_edges`) into the store, after keeping
   the original as `stg_store.h5.bak-before-gramf-publish-<date>`. This is the only time GrAMF
   writes a store;
 - CSV / GeoJSON export with a provenance README;
