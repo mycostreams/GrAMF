@@ -397,11 +397,12 @@ impl App {
                     n => format!(" ({n} on added edges stay in the annotation file)"),
                 };
                 self.status = format!(
-                    "Published to {}: {} measurements{skipped}, {} trails, {} roots; the previous store is kept as {}",
+                    "Published to {}: {} measurements{skipped}, {} trails, {} roots, {} added edges; the previous store is kept as {}",
                     path.display(),
                     p.measurements,
                     p.trails,
                     p.roots,
+                    p.added_edges,
                     p.backup.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())
                 );
             }

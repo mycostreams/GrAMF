@@ -405,7 +405,7 @@ mod tests {
 
         let p = publish::publish_with_backup(&a, &store, 10, &paths, "bak1").unwrap();
         let backup = dir.join("stg_store.h5.bak1");
-        assert_eq!(p, Published { measurements: 1, on_added_edges: 1, trails: 1, roots: 1, backup: backup.clone() });
+        assert_eq!(p, Published { measurements: 1, on_added_edges: 1, trails: 1, roots: 1, added_edges: 0, backup: backup.clone() });
         // the backup is the store as it was
         let b = hdf5_metno::File::open(&backup).unwrap();
         assert_eq!(b.dataset("root_nodes").unwrap().read_raw::<i64>().unwrap(), [7]);
